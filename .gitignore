@@ -1,0 +1,59 @@
+# API Keys and local configs (DO NOT COMMIT)
+.env
+local_config.py
+api_key.py
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data (keep structure, ignore generated content)
+data/synthetic/
+data/cpg_cache/
+data/datasets/
+experiments/
+
+# Joern output
+test_cpg/
+*.bin
+export.dot
+
+# OS
+.DS_Store
+Thumbs.db
+.env
+
+# 临时调试脚本与日志（v12~v22 迭代过程产物，不纳入版本库）
+_*.py
+_*.txt
+_*.log
+_*.bat
+_*.ps1
+_*.json
+v15_run.log
+v12_experiment_report.md
+*.bak
+
+# 评测输出与工作区（含运行时产物，可重建）
+output/
+cpg_output/
+workspace/
+evaluation/
+
+# SVEN 评测工作目录（独立子任务产物，不属于 HGL-Vul 主体）
+sven_eval/
+
+# 个人汇报/草稿
+wzh汇报_*.md
+组会报告*.md
+组会汇报*.md

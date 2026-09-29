@@ -1,0 +1,122 @@
+{
+  "n_functions": 582,
+  "feature_version": "9bb7aef83e",
+  "features": [
+    "is_dangerous_api",
+    "n_dangerous_apis",
+    "is_write_sink",
+    "is_taint_source",
+    "is_memory_op",
+    "is_free_family",
+    "is_alloc_family",
+    "is_fmt_family",
+    "is_call",
+    "is_method",
+    "is_control_structure",
+    "is_identifier",
+    "is_literal",
+    "is_block",
+    "in_degree",
+    "out_degree",
+    "degree_norm",
+    "dfg_in",
+    "dfg_out",
+    "cfg_in",
+    "cfg_out",
+    "call_in",
+    "call_out",
+    "code_len",
+    "has_arrow",
+    "has_index",
+    "has_func_call",
+    "g_log_nodes",
+    "g_log_edges",
+    "g_n_write",
+    "g_n_free",
+    "g_n_alloc",
+    "g_n_taint",
+    "g_n_fmt",
+    "nb_write",
+    "nb_free",
+    "nb_alloc",
+    "nb_taint",
+    "hint_UAF",
+    "hint_DoubleFree",
+    "hint_Overflow",
+    "hint_NullDeref",
+    "hint_FmtStr"
+  ],
+  "candidates": {
+    "lr": {
+      "auc": 0.7519,
+      "pr_auc": 0.4185,
+      "anchor_separation": -0.0245,
+      "mean_p_vuln_anchor": 0.5875,
+      "mean_p_benign_anchor": 0.612
+    },
+    "gbdt": {
+      "auc": 0.7762,
+      "pr_auc": 0.42,
+      "anchor_separation": 0.0108,
+      "mean_p_vuln_anchor": 0.3275,
+      "mean_p_benign_anchor": 0.3167
+    },
+    "mlp_gpu": {
+      "auc": 0.783,
+      "pr_auc": 0.4966,
+      "anchor_separation": 0.0182,
+      "mean_p_vuln_anchor": 0.6494,
+      "mean_p_benign_anchor": 0.6312
+    }
+  },
+  "top_features": [
+    [
+      "out_degree",
+      0.688
+    ],
+    [
+      "degree_norm",
+      0.668
+    ],
+    [
+      "code_len",
+      0.636
+    ],
+    [
+      "in_degree",
+      0.617
+    ],
+    [
+      "dfg_out",
+      0.603
+    ],
+    [
+      "has_arrow",
+      0.597
+    ],
+    [
+      "is_call",
+      0.594
+    ],
+    [
+      "call_out",
+      0.593
+    ],
+    [
+      "dfg_in",
+      0.591
+    ],
+    [
+      "cfg_out",
+      0.589
+    ],
+    [
+      "has_func_call",
+      0.586
+    ],
+    [
+      "cfg_in",
+      0.579
+    ]
+  ]
+}
