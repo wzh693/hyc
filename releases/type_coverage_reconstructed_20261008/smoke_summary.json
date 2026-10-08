@@ -1,0 +1,173 @@
+{
+  "metrics": {
+    "1": {
+      "n": 30,
+      "tp": 9,
+      "tn": 8,
+      "fp": 7,
+      "fn": 6,
+      "f1": 0.5806451612903226,
+      "accuracy": 0.5666666666666667,
+      "precision": 0.5625,
+      "recall": 0.6,
+      "mcc": 0.1336306209562122,
+      "errors": 0,
+      "uncertain": 0,
+      "total_tokens": 26046
+    },
+    "2": {
+      "n": 30,
+      "tp": 10,
+      "tn": 6,
+      "fp": 9,
+      "fn": 5,
+      "f1": 0.5882352941176471,
+      "accuracy": 0.5333333333333333,
+      "precision": 0.5263157894736842,
+      "recall": 0.6666666666666666,
+      "mcc": 0.06917144638660747,
+      "errors": 0,
+      "uncertain": 0,
+      "total_tokens": 26072
+    }
+  },
+  "by_cwe": {
+    "1": {
+      "CWE-125": {
+        "n": 10,
+        "tp": 2,
+        "tn": 1,
+        "fp": 4,
+        "fn": 3,
+        "f1": 0.36363636363636365,
+        "accuracy": 0.3,
+        "precision": 0.3333333333333333,
+        "recall": 0.4,
+        "mcc": -0.408248290463863,
+        "errors": 0,
+        "uncertain": 0,
+        "total_tokens": 8966
+      },
+      "CWE-190": {
+        "n": 10,
+        "tp": 5,
+        "tn": 4,
+        "fp": 1,
+        "fn": 0,
+        "f1": 0.9090909090909091,
+        "accuracy": 0.9,
+        "precision": 0.8333333333333334,
+        "recall": 1.0,
+        "mcc": 0.816496580927726,
+        "errors": 0,
+        "uncertain": 0,
+        "total_tokens": 8542
+      },
+      "CWE-416": {
+        "n": 10,
+        "tp": 2,
+        "tn": 3,
+        "fp": 2,
+        "fn": 3,
+        "f1": 0.4444444444444444,
+        "accuracy": 0.5,
+        "precision": 0.5,
+        "recall": 0.4,
+        "mcc": 0.0,
+        "errors": 0,
+        "uncertain": 0,
+        "total_tokens": 8538
+      }
+    },
+    "2": {
+      "CWE-125": {
+        "n": 10,
+        "tp": 3,
+        "tn": 0,
+        "fp": 5,
+        "fn": 2,
+        "f1": 0.46153846153846156,
+        "accuracy": 0.3,
+        "precision": 0.375,
+        "recall": 0.6,
+        "mcc": -0.5,
+        "errors": 0,
+        "uncertain": 0,
+        "total_tokens": 8966
+      },
+      "CWE-190": {
+        "n": 10,
+        "tp": 5,
+        "tn": 3,
+        "fp": 2,
+        "fn": 0,
+        "f1": 0.8333333333333334,
+        "accuracy": 0.8,
+        "precision": 0.7142857142857143,
+        "recall": 1.0,
+        "mcc": 0.6546536707079772,
+        "errors": 0,
+        "uncertain": 0,
+        "total_tokens": 8568
+      },
+      "CWE-416": {
+        "n": 10,
+        "tp": 2,
+        "tn": 3,
+        "fp": 2,
+        "fn": 3,
+        "f1": 0.4444444444444444,
+        "accuracy": 0.5,
+        "precision": 0.5,
+        "recall": 0.4,
+        "mcc": 0.0,
+        "errors": 0,
+        "uncertain": 0,
+        "total_tokens": 8538
+      }
+    }
+  },
+  "api_accounting": {
+    "invocations": 60,
+    "successful_invocations": 60,
+    "failed_invocations": 0,
+    "unknown_usage_invocations": 0,
+    "actual_models": {
+      "deepseek-flash": 60
+    },
+    "length_calls": 58,
+    "prompt_tokens": 43148,
+    "completion_tokens": 8970,
+    "total_tokens": 52118
+  },
+  "scheduled_results": 60,
+  "first_requests_verified": 60,
+  "repeat_prediction_disagreements": 3,
+  "always_positive": {
+    "n": 30,
+    "tp": 15,
+    "tn": 0,
+    "fp": 15,
+    "fn": 0,
+    "f1": 0.6666666666666666,
+    "accuracy": 0.5,
+    "precision": 0.5,
+    "recall": 1.0,
+    "mcc": 0,
+    "errors": 0,
+    "uncertain": 0,
+    "total_tokens": 0
+  },
+  "functional_gate": true,
+  "quality_sanity_gate": true,
+  "github_upload_eligible": true,
+  "scope": "30 exposed SVEN development rows, two stochastic repeats; NOT independent validation.",
+  "limitations": [
+    "No matched fresh control; no causal gain over a previous version can be claimed.",
+    "Repeats are the same 30 rows, not 60 independent samples.",
+    "150-token length truncation and legacy semantics remain recorded, not repaired in this run.",
+    "Historical 61.15% is not inherited; no locked test sent or evaluated.",
+    "Regex/preprocessing caches are for test execution only; not cold-cache production timing."
+  ],
+  "frozen_code_matches": true
+}
