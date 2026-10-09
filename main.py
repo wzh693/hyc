@@ -32,6 +32,12 @@ v2.0 新增:
 import sys
 import os
 
+# Windows 的默认 GBK 控制台无法编码评测日志中的 ✓/✗ 等字符，可能在
+# 已完成 LLM 调用后因打印日志而中断整个批次。入口统一使用 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # 从 config.py 读取 LLM 配置（也支持环境变量覆盖）
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 os.environ.setdefault("OPENAI_API_KEY", LLM_API_KEY)

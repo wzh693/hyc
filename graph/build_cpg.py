@@ -7,12 +7,43 @@ import glob as glob_mod
 import tempfile
 import uuid
 import sys
+import hashlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from config import JOERN_DIR, JOERN_PARSE_CMD, JOERN_EXPORT_CMD
 
 # 临时目录（无空格），避免 joern batch 文件的编码问题
 TEMP_CPG_DIR = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")), "joern_cpg")
+_CACHE_META = ".hgl_cpg_cache.json"
+_SANITIZER_VERSION = "joern-sanitize-v2"
+
+
+def _tool_identity(path: str) -> str:
+    try:
+        stat = os.stat(path)
+        return f"{os.path.abspath(path)}:{stat.st_size}:{stat.st_mtime_ns}"
+    except OSError:
+        return os.path.abspath(path)
+
+
+def _source_fingerprint(code: str, code_path: str = "") -> str:
+    """CPG cache key: source + parser/sanitizer identity."""
+    payload = "\n".join([
+        _SANITIZER_VERSION,
+        _tool_identity(JOERN_PARSE_CMD),
+        _tool_identity(JOERN_EXPORT_CMD),
+        os.path.splitext(code_path)[1].lower(),
+        code,
+    ])
+    return hashlib.sha256(payload.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _write_cache_meta(abs_out: str, fingerprint: str):
+    path = os.path.join(abs_out, _CACHE_META)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"source_fingerprint": fingerprint}, f, indent=2)
+    os.replace(tmp, path)
 
 # ── Joern 兼容性清洗（v12e+: 修复空骨架图 bug）──
 # FFmpeg/QEMU 的 GCC 属性宏出现在函数签名位置时，Joern NewC 前端会静默跳过
@@ -24,7 +55,26 @@ _ATTR_MACROS = re.compile(
     r'asmlinkage|fastcall|noinline|__init|__exit)\b'
 )
 _ATTR_GCC = re.compile(r'\b__attribute__\s*\(\(\s*[^)]*\)\)')
-_FUNC_METHOD = re.compile(r'\[label="METHOD"[^\]]*NAME="(?!<global>)[^"]*"')
+_DOT_NODE_ATTRS = re.compile(r'(?m)^\s*"(\d+)"\s*\[\s*((?:"(?:\\.|[^"\\])*"|[^\]])*)\]')
+_DOT_AST_EDGE = re.compile(r'(?m)^\s*"(\d+)"\s*->\s*"(\d+)"\s*\[\s*label="AST"')
+_DOT_ATTRIBUTE = re.compile(r'(\w+)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^"\s]+))')
+
+
+def _has_defined_function(content: str) -> bool:
+    """Match actual attributes, never NAME suffixes or attributes inside CODE."""
+    methods, blocks = set(), set()
+    for node in _DOT_NODE_ATTRS.finditer(content):
+        values={m.group(1):(m.group(2) if m.group(2) is not None else m.group(3))
+                for m in _DOT_ATTRIBUTE.finditer(node.group(2))}
+        if (values.get('label')=='METHOD' and values.get('IS_EXTERNAL')=='false'
+                and values.get('NAME') and not values['NAME'].startswith('<')):
+            methods.add(node.group(1))
+        if values.get('label')=='BLOCK' and values.get('CODE','').lstrip().startswith('{'):
+            blocks.add(node.group(1))
+    # METHOD CODE may be truncated before '{' for long signatures. Check its
+    # direct AST body instead; a macro-parsing stub has BLOCK CODE=<empty>.
+    return any(edge.group(1) in methods and edge.group(2) in blocks
+               for edge in _DOT_AST_EDGE.finditer(content))
 
 
 def _sanitize_for_joern(code: str) -> str:
@@ -37,7 +87,7 @@ def _dot_has_func_method(dot_path: str) -> bool:
     """验证导出 DOT 含真正的函数 METHOD 节点（防静默空图）。"""
     try:
         with open(dot_path, encoding="utf-8", errors="ignore") as f:
-            return bool(_FUNC_METHOD.search(f.read()))
+            return _has_defined_function(f.read())
     except OSError:
         return False
 
@@ -55,12 +105,25 @@ def build_cpg(code_path: str, output_dir: str) -> str:
     abs_code = os.path.abspath(code_path)
     abs_out = os.path.abspath(output_dir)
 
+    with open(abs_code, "r", encoding="utf-8", errors="ignore") as f:
+        raw_code = f.read()
+    source_fp = _source_fingerprint(raw_code, abs_code)
+    timeout_s = max(1, int(os.environ.get("JOERN_TIMEOUT_SECONDS", "600")))
+
     # v20：CPG 缓存短路——sample_dir 下已有通过空图校验的 export.dot 直接
     # 复用（idx→代码确定性，同键必同图）。全集 2406 样本时 Joern 重建是
     # 主要耗时项；缓存副本在写入前均经 _dot_has_func_method 校验，此处
     # 复用时再校验一次以防中断残留的半成品目录。
     cached_dot = os.path.join(abs_out, "export", "export.dot")
-    if os.path.exists(cached_dot) and _dot_has_func_method(cached_dot):
+    cache_meta = os.path.join(abs_out, _CACHE_META)
+    cached_fp = None
+    try:
+        with open(cache_meta, encoding="utf-8") as f:
+            cached_fp = json.load(f).get("source_fingerprint")
+    except (OSError, ValueError, AttributeError):
+        pass
+    if (cached_fp == source_fp and os.path.exists(cached_dot)
+            and _dot_has_func_method(cached_dot)):
         print(f"[Joern] 缓存命中: {cached_dot}")
         return os.path.dirname(cached_dot)
 
@@ -75,8 +138,6 @@ def build_cpg(code_path: str, output_dir: str) -> str:
     cpg_bin = os.path.join(work_dir, "cpg.bin")
 
     # v12e+: 属性宏清洗副本（仅作 Joern 输入；LLM 源码不受影响）
-    with open(abs_code, "r", encoding="utf-8", errors="ignore") as f:
-        raw_code = f.read()
     sanitized = _sanitize_for_joern(raw_code)
     if sanitized != raw_code:
         joern_input = os.path.join(work_dir, "input_sanitized.c")
@@ -108,16 +169,22 @@ def build_cpg(code_path: str, output_dir: str) -> str:
     parse_cmd = [joern_parse, joern_input, "--output", cpg_bin]
     print(f"[Joern] 解析命令: {' '.join(parse_cmd)}")
 
-    result = subprocess.run(
-        parse_cmd, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", env=env
-    )
+    try:
+        result = subprocess.run(
+            parse_cmd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", env=env, timeout=timeout_s
+        )
+    except Exception:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise
     if result.returncode != 0:
         print(f"[Error] Joern parse failed. returncode={result.returncode}")
         print(f"[Error] stderr: {result.stderr[:500] if result.stderr else 'empty'}")
+        shutil.rmtree(work_dir, ignore_errors=True)
         raise RuntimeError(f"Joern parse failed: {result.stderr or 'unknown error'}")
 
     if not os.path.exists(cpg_bin):
+        shutil.rmtree(work_dir, ignore_errors=True)
         raise FileNotFoundError(f"cpg.bin not created at {cpg_bin}")
 
     # Step 2: joern-export（使用内层 bin\joern-export.bat，传递 JVM 参数）
@@ -132,14 +199,20 @@ def build_cpg(code_path: str, output_dir: str) -> str:
     ]
     print(f"[Joern] 导出命令: {' '.join(export_cmd)}")
 
-    result = subprocess.run(
-        export_cmd, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", env=env
-    )
+    try:
+        result = subprocess.run(
+            export_cmd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", env=env, timeout=timeout_s
+        )
+    except Exception:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise
     if result.returncode != 0:
         print(f"[Warning] Joern export failed: {result.stderr[:200] if result.stderr else 'unknown'}")
         if os.path.exists(cpg_bin):
+            shutil.rmtree(work_dir, ignore_errors=True)
             raise RuntimeError(f"Joern export failed: {result.stderr[:100] if result.stderr else 'unknown'}")
+        shutil.rmtree(work_dir, ignore_errors=True)
         raise RuntimeError(f"Joern export failed: {result.stderr[:100] if result.stderr else 'unknown'}")
 
     # 检查导出结果，复制到目标目录
@@ -147,6 +220,7 @@ def build_cpg(code_path: str, output_dir: str) -> str:
     if os.path.exists(export_dot):
         # v12e+: 防静默空图 — 无函数 METHOD 节点视为解析失败
         if not _dot_has_func_method(export_dot):
+            shutil.rmtree(work_dir, ignore_errors=True)
             raise RuntimeError(
                 "Joern exported DOT has no function METHOD node (silent empty graph). "
                 "Check source for unsupported syntax."
@@ -156,6 +230,8 @@ def build_cpg(code_path: str, output_dir: str) -> str:
         if os.path.exists(target_export):
             shutil.rmtree(target_export)
         shutil.copytree(export_work, target_export)
+        _write_cache_meta(abs_out, source_fp)
+        shutil.rmtree(work_dir, ignore_errors=True)
         print(f"[Joern] DOT 导出成功: {target_export}")
         return target_export
 
@@ -163,13 +239,19 @@ def build_cpg(code_path: str, output_dir: str) -> str:
     for root, dirs, files in os.walk(work_dir):
         for f in files:
             if f == "export.dot":
+                if not _dot_has_func_method(os.path.join(root,f)):
+                    shutil.rmtree(work_dir,ignore_errors=True)
+                    raise RuntimeError('Fallback export contains no defined function body')
                 os.makedirs(abs_out, exist_ok=True)
                 target_export = os.path.join(abs_out, "export")
                 os.makedirs(target_export, exist_ok=True)
                 shutil.move(os.path.join(root, f), os.path.join(target_export, "export.dot"))
+                _write_cache_meta(abs_out, source_fp)
+                shutil.rmtree(work_dir, ignore_errors=True)
                 print(f"[Joern] DOT 导出成功: {target_export}")
                 return target_export
 
+    shutil.rmtree(work_dir, ignore_errors=True)
     raise FileNotFoundError(f"No export.dot found in {work_dir}")
 
 

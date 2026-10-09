@@ -63,7 +63,11 @@ def generate_explanation(
     parts.append("\n[Trigger Condition Analysis]:")
     vt_lower = vulnerability_type.lower()
 
-    if "use-after-free" in vt_lower:
+    if getattr(program_state, 'observation_only', False):
+        parts.append("  STATE lists lexical may-events only; execution order, guards, "
+                     "allocation identity and alias propagation are unresolved. "
+                     "No type-specific safety/vulnerability claim is inferred from STATE.")
+    elif "use-after-free" in vt_lower:
         parts.extend(_analyze_uaf(program_state))
     elif "double free" in vt_lower:
         parts.extend(_analyze_double_free(program_state))

@@ -16,9 +16,11 @@ import sys
 import json
 import time
 import random
+import hashlib
 
-from config import LLM_MODEL, SEED
+from config import LLM_MODEL, SEED, DEVIGN_JSON_PATH, DEVIGN_ENHANCE_DIR
 from reasoning.llm_api import create_client
+from reasoning.reasoning_loop import parse_binary_verdict
 
 
 def mode_evaluate_direct_llm(
@@ -46,15 +48,15 @@ def mode_evaluate_direct_llm(
 
     # ---- 路径解析 ----
     if devign_json is None:
-        candidate = r"C:\Users\wzh13\Desktop\Network Security Research\Enhancing Vulnerability Detection via Inter-procedural Semantic CompletionEnhancing Vulnerability Detection via Inter-procedural Semantic Completion\data\origin-20260913T072238Z-1-001\origin\devign.json"
+        candidate = DEVIGN_JSON_PATH
         if os.path.exists(candidate):
             devign_json = candidate
         else:
-            print("[Error] 未指定 devign_json 路径，请通过参数传入")
+            print("[Error] 未指定 devign_json 路径，请设置 DEVIGN_JSON_PATH 或调用参数")
             sys.exit(1)
 
     if enhance_dir is None:
-        candidate = r"C:\Users\wzh13\Desktop\Network Security Research\Enhancing Vulnerability Detection via Inter-procedural Semantic CompletionEnhancing Vulnerability Detection via Inter-procedural Semantic Completion\data\enhance-20260913T072240Z-1-001\enhance\devign"
+        candidate = DEVIGN_ENHANCE_DIR
         if os.path.exists(candidate):
             enhance_dir = candidate
         else:
@@ -90,6 +92,11 @@ def mode_evaluate_direct_llm(
     print(f"\n[Step 2/5] 准备样本")
     processor = DevignBatchProcessor(output_dir=output_dir)
     metadata_list = processor.prepare_samples(test_samples, use_enhanced=False)
+    from modes.compare_devign import _pipeline_fingerprint
+    run_fp = hashlib.sha256(
+        f"direct|{_pipeline_fingerprint()}|{fold}|{LLM_MODEL}".encode()
+    ).hexdigest()[:16]
+    selected_indices = {m["idx"] for m in metadata_list}
 
     # ---- Step 3: 初始化 LLM ----
     print(f"\n[Step 3/5] 初始化 LLM 客户端")
@@ -97,6 +104,10 @@ def mode_evaluate_direct_llm(
 
     # 恢复已有结果
     existing_results = processor.load_results() if resume else []
+    existing_results = [r for r in existing_results
+                        if r.get("mode") == "direct_llm"
+                        and r.get("pipeline_fp") == run_fp
+                        and r.get("idx") in selected_indices]
     completed_indices = {r.get("idx") for r in existing_results}
     print(f"  已有结果: {len(completed_indices)} 个样本")
 
@@ -138,20 +149,17 @@ Is this code vulnerable? Answer with exactly one word: "vulnerable" or "benign".
                 "fold": meta["fold"],
                 "project": meta["project"],
                 "mode": "direct_llm",
+                "pipeline_fp": run_fp,
                 "error": None,
-                "prediction": 0,
+                "prediction": None,
             }
 
             try:
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     code = f.read()
 
-                # 截断过长代码（防止超出 context）
-                max_code_len = 6000
-                if len(code) > max_code_len:
-                    code = code[:max_code_len] + "\n// ... (truncated)"
-
                 prompt = DIRECT_PROMPT_TEMPLATE.format(code=code)
+                result['source_truncated'] = False
 
                 response = llm_client.chat.completions.create(
                     model=LLM_MODEL,
@@ -161,12 +169,16 @@ Is this code vulnerable? Answer with exactly one word: "vulnerable" or "benign".
                 )
                 answer = response.choices[0].message.content.strip().lower()
                 result["raw_answer"] = answer
-                result["prediction"] = 1 if "vulnerable" in answer else 0
+                result['tokens_used'] = response.usage.total_tokens if response.usage else 0
+                result['usage_unknown'] = response.usage is None
+                result["prediction"] = parse_binary_verdict(answer)
+                if result["prediction"] is None:
+                    raise ValueError(f"Ambiguous verdict: {answer[:120]!r}")
                 result["error"] = None
 
             except Exception as e:
                 print(f"    [Error] {e}")
-                result["prediction"] = 0
+                result["prediction"] = None
                 result["error"] = str(e)
 
             is_correct = result["prediction"] == target
@@ -181,21 +193,11 @@ Is this code vulnerable? Answer with exactly one word: "vulnerable" or "benign".
         print(f"\n  评测完成: {len(pending)} 样本, 耗时 {total_time:.1f}s")
 
     # ---- Step 5: 计算指标 ----
-    valid_results = [r for r in results if r.get("prediction") is not None]
-    y_true = [r["target"] for r in valid_results]
-    y_pred = [r["prediction"] for r in valid_results]
-
-    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-    metrics = {
-        "accuracy": accuracy_score(y_true, y_pred),
-        "precision": precision_score(y_true, y_pred, zero_division=0),
-        "recall": recall_score(y_true, y_pred, zero_division=0),
-        "f1": f1_score(y_true, y_pred, zero_division=0),
-        "total_samples": len(valid_results),
-        "vulnerable": sum(y_true),
-        "benign": len(y_true) - sum(y_true),
-        "mode": "direct_llm",
-    }
+    from evaluation.metrics import compute_metrics
+    y_true = [r['target'] for r in results]
+    metrics = compute_metrics(y_true, [r.get('prediction') for r in results])
+    metrics.update(total_samples=len(results), vulnerable=sum(y_true),
+                   benign=len(y_true)-sum(y_true), mode='direct_llm')
 
     print(f"\n  {'='*50}")
     print(f"  Direct LLM on Devign (Fold {fold}) — Results")
@@ -213,7 +215,7 @@ Is this code vulnerable? Answer with exactly one word: "vulnerable" or "benign".
             "fold": fold,
             "max_samples": max_samples,
             "llm_model": LLM_MODEL,
-        }, "metrics": metrics, "results": valid_results}, f, indent=2, ensure_ascii=False)
+        }, "metrics": metrics, "results": results}, f, indent=2, ensure_ascii=False)
     print(f"\n[Saved] {output_path}")
 
     return metrics

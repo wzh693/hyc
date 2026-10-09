@@ -48,12 +48,33 @@ v12_experiment_report.md
 output/
 cpg_output/
 workspace/
-evaluation/
 
-# SVEN 评测工作目录（独立子任务产物，不属于 HGL-Vul 主体）
-sven_eval/
+# evaluation 是被主程序直接导入的源码包，不能整目录忽略。
+# 只忽略其中的运行时缓存/结果，保留 Python 模块可纳入版本控制。
+evaluation/__pycache__/
+evaluation/output/
+!evaluation/__init__.py
+
+# SVEN 数据、CPG 与输出可重建；保留评测脚本本身。
+sven_eval/*
+!sven_eval/data/
+sven_eval/data/*
+!sven_eval/data/*.py
+!sven_eval/data/*.json
 
 # 个人汇报/草稿
 wzh汇报_*.md
 组会报告*.md
 组会汇报*.md
+
+# Local experiment data, weights and raw audit artifacts (not publication source)
+learning/model/*.pt
+learning/model/*.pkl
+learning/model/gat_*/
+learning/model/gat_calibration.json
+learning/model/gat_report.json
+evaluation/protocol_20261005/*.json
+evaluation/protocol_clone_v2_20261005/*.json
+baselines/*/offline_audit*/
+sven_eval/data/*.json
+*.log

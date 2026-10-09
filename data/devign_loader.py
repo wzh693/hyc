@@ -22,6 +22,7 @@ import os
 import json
 import random
 import tempfile
+import csv
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -380,10 +381,14 @@ class DevignBatchProcessor:
         # 同时保存 CSV 格式方便查看
         csv_file = os.path.join(self.results_dir, "evaluation_results.csv")
         if not os.path.exists(csv_file):
-            with open(csv_file, "w", encoding="utf-8") as f:
-                f.write("idx,target,prediction,fold,project,hop_count,error\n")
-        with open(csv_file, "a", encoding="utf-8") as f:
+            with open(csv_file, "w", encoding="utf-8", newline="") as f:
+                csv.writer(f).writerow(
+                    ["idx", "target", "prediction", "fold", "project", "hop_count", "error"]
+                )
+        with open(csv_file, "a", encoding="utf-8", newline="") as f:
             r = result
-            f.write(f"{r.get('idx','')},{r.get('target',-1)},{r.get('prediction',-1)},"
-                    f"{r.get('fold',-1)},{r.get('project','')},{r.get('hop_count',0)},"
-                    f"{r.get('error','')}\n")
+            csv.writer(f).writerow([
+                r.get("idx", ""), r.get("target", -1), r.get("prediction", ""),
+                r.get("fold", -1), r.get("project", ""), r.get("hop_count", 0),
+                r.get("error", ""),
+            ])

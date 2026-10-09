@@ -59,13 +59,23 @@ def _node_security_hit(nd: dict) -> tuple:
     函数级全局标注（良性函数任一处 memcpy 会让所有路径都带
     SINK=memcpy，危险信号失真放大）。
     """
-    text = _node_text_fields(nd).lower()
+    from config import STRICT_OPERATION_TAGS
+    if STRICT_OPERATION_TAGS:
+        # Container code and enclosing-method names are not executed API calls.
+        if nd.get("node_type") != "CALL":
+            return "", ""
+        from graph.security_net import _mask_noncode
+        operation = _mask_noncode(nd.get("code", "") or "").strip()
+        called = re.match(r'([A-Za-z_]\w*)\s*\(', operation)
+        text = called.group(1).lower() if called else ""
+    else:
+        text = _node_text_fields(nd).lower()
 
     # SINK：危险 API（strcpy, system, memcpy, sprintf 等）
     sink_apis = {"strcpy", "strcat", "sprintf", "system", "execve", "popen",
                  "memcpy", "memmove", "memset", "gets", "scanf",
                  "strncpy", "strncat", "snprintf"}
-    for api in sink_apis:
+    for api in sorted(sink_apis):
         if re.search(rf'\b{re.escape(api)}\b', text):
             return "SINK", api
 
@@ -73,13 +83,13 @@ def _node_security_hit(nd: dict) -> tuple:
     alloc_apis = {"malloc", "calloc", "realloc", "alloca", "mmap",
                   "av_malloc", "av_calloc", "av_realloc", "av_mallocz",
                   "kmalloc", "kzalloc", "kcalloc"}
-    for api in alloc_apis:
+    for api in sorted(alloc_apis):
         if re.search(rf'\b{re.escape(api)}\b', text):
             return "ALLOC", api
 
     # FREE：内存释放
     free_apis = {"free", "munmap", "av_free", "av_freep", "kfree"}
-    for api in free_apis:
+    for api in sorted(free_apis):
         if re.search(rf'\b{re.escape(api)}\b', text):
             return "FREE", api
 
@@ -87,7 +97,7 @@ def _node_security_hit(nd: dict) -> tuple:
     taint_sources = {"recv", "read", "fread", "scanf", "gets", "fgets",
                      "argv", "getenv", "recvfrom", "recvmsg",
                      "copy_from_user", "fopen", "open"}
-    for api in taint_sources:
+    for api in sorted(taint_sources):
         if re.search(rf'\b{re.escape(api)}\b', text):
             return "SOURCE", api
 
@@ -466,9 +476,13 @@ def _slice_source(src: str, max_chars: int = 450, anchors: set = None,
     if not src:
         return ""
 
+    from config import SOURCE_SLICE_ASSIGNMENT_FIX
+
     keep_pat = re.compile(
         r"(^\s*(?:if|else|for|while|switch|case|default|do|return|goto|break|continue)\b)"
         r"|[=+\-*/%&|^<>!]="  # 赋值/复合赋值/比较
+        + (r"|(?<![=!<>])=(?!=)|\+\+|--" if SOURCE_SLICE_ASSIGNMENT_FIX else "")
+        +
         r"|\w\s*\("          # 函数调用
         r"|->|\[.+\]|\*"    # 指针/数组访问
         r"|^\s*#"            # 预处理
@@ -477,13 +491,28 @@ def _slice_source(src: str, max_chars: int = 450, anchors: set = None,
 
     out_lines = []
     skip_streak = 0
+    in_block_comment = False
     for line in src.split("\n"):
         stripped = line.strip()
+        # A leading '*' may be a dereference statement, not a comment.
+        # Track actual block delimiters instead of discarding every '*...' line.
+        if in_block_comment:
+            if "*/" not in stripped:
+                continue
+            stripped = stripped.split("*/", 1)[1].strip()
+            line = stripped
+            in_block_comment = False
+        if stripped.startswith("/*"):
+            if "*/" not in stripped:
+                in_block_comment = True
+                continue
+            stripped = stripped.split("*/", 1)[1].strip()
+            line = stripped
         if not stripped:
             skip_streak += 1
             continue
         # 注释行
-        if stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
+        if stripped.startswith("//") or (not SOURCE_SLICE_ASSIGNMENT_FIX and stripped.startswith("*")):
             skip_streak += 1
             continue
         # 纯括号/分号行
@@ -576,8 +605,11 @@ def _collect_graph_anchors(G, topk_paths) -> set:
     "图压缩 + 路径检索"的产物，与框架主线自洽。
     """
     anchors = set()
+    from config import FOCUSED_GRAPH_ANCHORS
     # 危险节点（code 含危险 API 调用）
     for nid, ndata in G.nodes(data=True):
+        if FOCUSED_GRAPH_ANCHORS and not _node_security_label(ndata):
+            continue
         code = (ndata.get("code") or "").strip()
         if len(code) >= 6:
             anchors.add(_norm_code(code))
@@ -597,6 +629,8 @@ def build_hierarchical_context(
     fourth_arg=None,
     fifth_arg=None,
     api_hints: dict = None,
+    include_state: bool = True,
+    source_evidence: str = None,
 ) -> str:
     """
     构建完整的层次化上下文 (Hierarchical Context)，供 LLM 消费。
@@ -651,24 +685,28 @@ def build_hierarchical_context(
             src_budget = 600
             src = ""
         parts.append(src)
+        if source_evidence is not None:
+            parts[-1] = source_evidence
         parts.append("")
 
-        parts.append("SUMMARY:")
-        fs = function_summary or ""
-        if len(fs) > 150:
-            fs = fs[:150]
-        parts.append(fs)
-        parts.append("")
+        from config import COMPACT_THREE_PART_CONTEXT
+        if not COMPACT_THREE_PART_CONTEXT:
+            parts.append("SUMMARY:")
+            fs = function_summary or ""
+            if len(fs) > 150:
+                fs = fs[:150]
+            parts.append(fs)
+            parts.append("")
 
-        parts.append("BLOCKS:")
-        if block_summaries:
-            # v22：SRC 扩容样本压 1 块对冲 token（每块 ~80ch）；短函数保持 2 块
-            n_blocks = 1 if src_budget > 600 else 2
-            for block_id, summary in list(block_summaries.items())[:n_blocks]:
-                if summary:
-                    first = summary[0] if isinstance(summary, list) else summary
-                    parts.append(f"- B{block_id}: {first}")
-        parts.append("")
+            parts.append("BLOCKS:")
+            if block_summaries:
+                # v22：SRC 扩容样本压 1 块对冲 token（每块 ~80ch）；短函数保持 2 块
+                n_blocks = 1 if src_budget > 600 else 2
+                for block_id, summary in list(block_summaries.items())[:n_blocks]:
+                    if summary:
+                        first = summary[0] if isinstance(summary, list) else summary
+                        parts.append(f"- B{block_id}: {first}")
+            parts.append("")
 
         # v16：SAFE 缓解证据层已回退（v15 安全锚点双刃剑：TP→FN 12 崩 Rec）。
         # _detect_benign_evidence 仍保留供 build_compact_context 用，但不再
@@ -725,18 +763,20 @@ def build_hierarchical_context(
         else:
             parts.append("  (none)")
         parts.append("")
-        parts.append("STATE:")
-        if function_code:
-            from planning.state_memory import ProgramState
-            state = ProgramState()
+        if include_state:
+            parts.append("STATE:")
+        if include_state and function_code:
+            from planning.state_memory import create_program_state
+            state = create_program_state()
             state.track_vars(function_code)
             state_str = state.serialize()
             if state_str:
                 # 状态串上限 150 字符，控制 token 预算（v6: 200→150）
-                parts.append(state_str[:150])
+                parts.append(state.render(150) if getattr(state, 'observation_only', False)
+                             else state_str[:150])
             else:
                 parts.append("  (no variable state tracked)")
-        else:
+        elif include_state:
             parts.append("  (no source code available for state tracking)")
 
         return "\n".join(parts)
@@ -1094,14 +1134,17 @@ def build_compact_context(
             parts.append(f"[DATAFLOW] {df}")
 
     if function_code:
-        from planning.state_memory import ProgramState
-        state = ProgramState()
+        from planning.state_memory import create_program_state
+        state = create_program_state()
         state.track_vars(function_code)
         state_str = state.serialize()
         if state_str:
-            compact_state = state_str.replace("\n", " ").strip()
-            if len(compact_state) > 300:
-                compact_state = compact_state[:400] + ".."
+            if getattr(state, 'observation_only', False):
+                compact_state = state.render(400)
+            else:
+                compact_state = state_str.replace("\n", " ").strip()
+                if len(compact_state) > 300:
+                    compact_state = compact_state[:400] + ".."
             parts.append(f"[STATE] {compact_state}")
 
     path_lines = []

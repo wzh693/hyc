@@ -176,7 +176,7 @@ def extract_candidate_paths_from_node(
     def dfs(node: str, current: list, depth: int):
         if len(paths) >= max_paths_per_node:
             return  # 已到达上限，提前终止
-        if depth > max_hop:
+        if depth >= max_hop:
             return
         # 按边类型优先级排序：数据流优先，调用其次，最后是控制流和AST
         outgoing = list(G.out_edges(node, data=True))

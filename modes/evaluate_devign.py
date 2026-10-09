@@ -12,8 +12,9 @@ import sys
 import json
 import time
 import random
+import hashlib
 
-from config import LLM_MODEL, SEED
+from config import LLM_MODEL, SEED, DEVIGN_JSON_PATH, DEVIGN_ENHANCE_DIR
 from graph.build_cpg import build_cpg, find_export_files
 from graph.load_graph import load_graph
 from graph.summarize_graph import summarize_graph
@@ -62,16 +63,16 @@ def mode_evaluate_devign(
 
     # ---- 路径解析 ----
     if devign_json is None:
-        candidate = r"C:\Users\wzh13\Desktop\Network Security Research\Enhancing Vulnerability Detection via Inter-procedural Semantic CompletionEnhancing Vulnerability Detection via Inter-procedural Semantic Completion\data\origin-20260913T072238Z-1-001\origin\devign.json"
+        candidate = DEVIGN_JSON_PATH
         if os.path.exists(candidate):
             devign_json = candidate
         else:
-            print("[Error] 未指定 devign_json 路径，请通过 --devign-json 参数传入")
+            print("[Error] 未指定 devign_json 路径，请设置 DEVIGN_JSON_PATH 或调用参数")
             print("  用法: python main.py evaluate-devign --devign-json <path>")
             sys.exit(1)
 
     if enhance_dir is None:
-        candidate = r"C:\Users\wzh13\Desktop\Network Security Research\Enhancing Vulnerability Detection via Inter-procedural Semantic CompletionEnhancing Vulnerability Detection via Inter-procedural Semantic Completion\data\enhance-20260913T072240Z-1-001\enhance\devign"
+        candidate = DEVIGN_ENHANCE_DIR
         if os.path.exists(candidate):
             enhance_dir = candidate
         else:
@@ -119,6 +120,12 @@ def mode_evaluate_devign(
     print(f"\n[Step 2/6] 准备样本文件")
     processor = DevignBatchProcessor(output_dir=output_dir)
     metadata_list = processor.prepare_samples(test_samples, use_enhanced=use_enhanced)
+    from modes.compare_devign import _pipeline_fingerprint
+    run_fp = hashlib.sha256(
+        f"devign|{_pipeline_fingerprint()}|{fold}|{token_budget}|"
+        f"{use_enhanced}|{enhance_model}|{LLM_MODEL}".encode()
+    ).hexdigest()[:16]
+    selected_indices = {m["idx"] for m in metadata_list}
 
     # ---- Step 3: 初始化 LLM ----
     print(f"\n[Step 3/6] 初始化 LLM 客户端")
@@ -126,6 +133,10 @@ def mode_evaluate_devign(
 
     # ---- Step 4: 恢复已有结果（支持断点续评） ----
     existing_results = processor.load_results() if resume else []
+    existing_results = [r for r in existing_results
+                        if r.get("mode") == "hgl_vul"
+                        and r.get("pipeline_fp") == run_fp
+                        and r.get("idx") in selected_indices]
     completed_indices = {r.get("idx") for r in existing_results}
     print(f"  已有结果: {len(completed_indices)} 个样本")
 
@@ -160,68 +171,27 @@ def mode_evaluate_devign(
                 "project": meta["project"],
                 "commit_id": meta["commit_id"],
                 "use_enhanced": use_enhanced,
+                "mode": "hgl_vul",
+                "pipeline_fp": run_fp,
                 "hop_count": 0,
                 "error": None,
-                "prediction": 0,
+                "prediction": None,
             }
 
             try:
-                # Phase 1: CPG 构建
+                from graph.pipeline import run_hgl_pipeline
                 sample_dir = os.path.join(output_dir, "cpg", sample_id)
-                os.makedirs(sample_dir, exist_ok=True)
-
-                try:
-                    export_dir = build_cpg(file_path, sample_dir)
-                    nodes_file, edges_file = find_export_files(export_dir)
-                except Exception:
-                    # 回退：尝试已有文件
-                    nodes_file = os.path.join(sample_dir, "nodes.json")
-                    edges_file = os.path.join(sample_dir, "edges.json")
-                    if not os.path.exists(nodes_file) or not os.path.exists(edges_file):
-                        raise
-
-                # Phase 2: 图加载
-                G = load_graph(nodes_file, edges_file)
-
-                # Phase 3: 图压缩
-                SG = summarize_graph(G, token_budget=token_budget)
-                reduction_stats = SG.graph.get("reduction_stats", {})
-                result["orig_nodes"] = reduction_stats.get("orig_nodes", G.number_of_nodes())
-                result["compressed_nodes"] = reduction_stats.get("compressed_nodes", SG.number_of_nodes())
-                result["node_reduction_pct"] = reduction_stats.get("node_reduction_pct", 0)
-
-                # Phase 4: 路径检索
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     code = f.read()
-
-                candidate_paths = extract_all_candidate_paths(SG, source_code=code)
-                if not candidate_paths:
-                    candidate_paths = extract_all_candidate_paths(G, source_code=code)
-                topk_paths = retrieve_topk(SG if candidate_paths else G, candidate_paths)
-
-                # Phase 5: 层次化线性化
-                func_summary = summarize_function(code)
-                api_hints = extract_api_hints(code)
-                blocks = code.split("\n\n")
-                block_summaries = {}
-                for j, block in enumerate(blocks):
-                    if block.strip():
-                        block_summaries[j] = summarize_block(block) or block.strip()[:80]
-
-                # Phase 6: 受限推理循环
-                reasoning_result = reasoning_loop(
-                    SG, topk_paths, code, func_summary, block_summaries,
-                    client=llm_client,
-                )
-                llm_prediction = 1 if reasoning_result.get("vulnerability_type", "Unknown") != "Unknown" else 0
-                result["prediction"] = llm_prediction
-                result["vulnerability_type"] = reasoning_result.get("vulnerability_type", "Unknown")
-                result["reasoning_steps"] = reasoning_result.get("steps", 0)
+                details = run_hgl_pipeline(file_path, code, sample_id, sample_dir, llm_client,
+                                           token_budget, return_details=True)
+                result.update(details)
+                result["node_reduction_pct"] = details["reduction_stats"].get("node_reduction_pct", 0)
                 result["error"] = None
 
             except Exception as e:
                 print(f"    [Error] {e}")
-                result["prediction"] = 0
+                result["prediction"] = None
                 result["error"] = str(e)
 
             # 记录
@@ -242,28 +212,19 @@ def mode_evaluate_devign(
     # ---- Step 6: 计算指标 ----
     print(f"\n[Step 5/6] 计算评测指标")
 
-    # 过滤有结果的样本
-    valid_results = [r for r in results if r.get("prediction") is not None]
-    y_true = [r["target"] for r in valid_results]
-    y_pred = [r["prediction"] for r in valid_results]
-
-    # 计算指标
-    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, matthews_corrcoef
-    metrics = {
-        "accuracy": accuracy_score(y_true, y_pred),
-        "precision": precision_score(y_true, y_pred, zero_division=0),
-        "recall": recall_score(y_true, y_pred, zero_division=0),
-        "f1": f1_score(y_true, y_pred, zero_division=0),
-        "mcc": matthews_corrcoef(y_true, y_pred),
-        "total_samples": len(valid_results),
-        "vulnerable": sum(y_true),
-        "benign": len(y_true) - sum(y_true),
-    }
+    from evaluation.metrics import compute_metrics
+    y_true = [r['target'] for r in results]
+    metrics = compute_metrics(y_true, [r.get('prediction') for r in results])
+    tp, tn, fp, fn = (metrics[k] for k in ('tp', 'tn', 'fp', 'fn'))
+    denominator = ((tp+fp)*(tp+fn)*(tn+fp)*(tn+fn)) ** .5
+    metrics.update(mcc=(tp*tn-fp*fn)/denominator if denominator else 0.0,
+                   total_samples=len(results), vulnerable=sum(y_true),
+                   benign=len(y_true)-sum(y_true))
 
     # 按项目分层
     from collections import defaultdict
     project_metrics = defaultdict(list)
-    for r in valid_results:
+    for r in results:
         project_metrics[r.get("project", "unknown")].append(r)
 
     print(f"\n  {'='*50}")
@@ -297,15 +258,15 @@ def mode_evaluate_devign(
         "project_breakdown": {
             proj: {
                 "count": len(samples),
-                "accuracy": accuracy_score(
+                "accuracy": compute_metrics(
                     [r["target"] for r in samples],
-                    [r["prediction"] for r in samples]
-                ),
+                    [r.get("prediction") for r in samples]
+                )['accuracy'],
                 "vuln": sum(1 for r in samples if r["target"] == 1),
             }
             for proj, samples in sorted(project_metrics.items())
         },
-        "results": valid_results,
+        "results": results,
     }
 
     output_path = os.path.join(output_dir, "devign_evaluation_results.json")

@@ -1,0 +1,22 @@
+{
+  "name": "graph_display_candidate_20261009",
+  "policy": "visible_read_diversity_v2",
+  "foundation": "type_coverage_reconstructed_20261008",
+  "default_selected": false,
+  "future_llm_test_authorized": false,
+  "authorization_scope": "one full254 control/candidate two-repeat1016-result batch COMPLETE; authorization consumed; no reruns or upload",
+  "prediction_quality_status": "full254 real LLM audit passed; four of five quality gates failed; not selected",
+  "changed_prediction_files": ["retrieval/retrieve_topk.py"],
+  "changed_module_sha256": "64f942860ba0dce160cac178fa4447976e0b9cf6b223270b7b3ee11aeb4cb938",
+  "full_local_sven_rows": 254,
+  "stage_preflight_mock_invocations": 508,
+  "final_runtime_preflight_mock_invocations": 1016,
+  "real_model_invocations": 1019,
+  "planned_results_completed": 1016,
+  "engineering_verification_passed": true,
+  "freeze_manifest": "../../output/graph_display_preflight_v2_20261009/manifest.json",
+  "freeze_manifest_sha256": "593b7d19425fc933784d51ca626bb4887497a8bc3d6abaa5a3d5d66eb8e6f8a2",
+  "findings": "../../evaluation/GRAPH_DISPLAY_FINDINGS_20261009.md",
+  "llm_findings": "../../evaluation/GRAPH_DISPLAY_LLM_FINDINGS_20261009.md",
+  "llm_run": "../../output/graph_display_llm1016_20261009"
+}

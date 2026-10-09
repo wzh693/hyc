@@ -4,13 +4,18 @@ import re
 import os
 
 
-def load_graph(nodes_file: str, edges_file: str) -> nx.MultiDiGraph:
+def load_graph(nodes_file: str, edges_file: str = None) -> nx.MultiDiGraph:
     """
     从 Joern 导出的 nodes.json/edges.json 或 DOT 文件加载 CPG。
     返回 networkx.MultiDiGraph（支持多重边，即同一对节点间可存在多条不同类型的边）。
     """
-    if nodes_file.endswith(".dot") or not os.path.exists(nodes_file):
-        return load_graph_from_dot(edges_file if edges_file.endswith(".dot") else None)
+    if nodes_file and nodes_file.endswith(".dot"):
+        return load_graph_from_dot(nodes_file)
+    if not nodes_file or not os.path.exists(nodes_file):
+        dot_file = edges_file if edges_file and edges_file.endswith(".dot") else None
+        return load_graph_from_dot(dot_file)
+    if not edges_file:
+        raise FileNotFoundError("edges_file is required when loading JSON exports")
     return load_graph_from_json(nodes_file, edges_file)
 
 
@@ -41,7 +46,8 @@ def load_graph_from_json(nodes_file: str, edges_file: str) -> nx.MultiDiGraph:
         src = str(e["outNode"])
         dst = str(e["inNode"])
         label = e.get("label", e.get("edge_type", ""))
-        G.add_edge(src, dst, edge_type=label)
+        if G.has_node(src) and G.has_node(dst):
+            G.add_edge(src, dst, edge_type=label)
 
     print(f"[Graph] 加载完成: {G.number_of_nodes()} 节点, {G.number_of_edges()} 边")
     return G
@@ -66,34 +72,51 @@ def load_graph_from_dot(dot_file: str) -> nx.MultiDiGraph:
     # 否则其后 LINE_NUMBER/NAME/METHOD_FULL_NAME 全部丢失（数组操作节点系统性缺属性）
     # (?<!-> ) 排除边行目标端：边 "A" -> "B" [label="AST"] 中 "B" [ 同样匹配节点正则,
     # add_node 会用边类型覆盖节点真实 node_type（v1 起的系统性 bug, 已修复）
-    node_pattern = r'(?<!-> )"(\d+)"\s*\[\s*((?:"[^"]*"|[^\]])*)\]'
+    node_pattern = r'(?m)^\s*"(\d+)"\s*\[\s*((?:"(?:\\.|[^"\\])*"|[^\]])*)\]\s*;?'
     edge_pattern = r'"(\d+)"\s*->\s*"(\d+)"\s*\[\s*label="([^"]+)"'
+
+    def attribute_values(attrs_str):
+        # Consume whole quoted values, including CODE, before numeric attrs.
+        # Otherwise LINE_NUMBER text inside a string literal can spoof metadata.
+        pattern = r'(\w+)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^"\s]+))'
+        return {m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+                for m in re.finditer(pattern, attrs_str)}
+
+    def quoted_attr(values: dict, name: str):
+        value = values.get(name)
+        if value is None:
+            return None
+        return (value.replace(r'\"', '"').replace(r'\n', '\n')
+                .replace(r'\t', '\t').replace(r'\\', '\\'))
 
     for match in re.finditer(node_pattern, content):
         node_id = match.group(1)
         attrs_str = match.group(2)
+        values = attribute_values(attrs_str)
 
         attrs = {}
 
-        label_match = re.search(r'label="([^"]*)"', attrs_str)
-        if label_match:
-            attrs["node_type"] = label_match.group(1)
+        label = quoted_attr(values, "label")
+        if label is not None:
+            attrs["node_type"] = label
 
-        code_match = re.search(r'CODE="([^"]*)"', attrs_str)
-        if code_match:
-            attrs["code"] = code_match.group(1)
+        code_value = quoted_attr(values, "CODE")
+        if code_value is not None:
+            attrs["code"] = code_value
 
-        line_match = re.search(r'LINE_NUMBER=(\d+)', attrs_str)
-        if line_match:
-            attrs["line_number"] = int(line_match.group(1))
+        for attribute, key in (("LINE_NUMBER", "line_number"),
+                               ("COLUMN_NUMBER", "column_number")):
+            value = values.get(attribute, "")
+            if value.isdecimal():
+                attrs[key] = int(value)
 
-        method_match = re.search(r'METHOD_FULL_NAME="([^"]*)"', attrs_str)
-        if method_match:
-            attrs["method"] = method_match.group(1)
+        method = quoted_attr(values, "METHOD_FULL_NAME")
+        if method is not None:
+            attrs["method"] = method
 
-        name_match = re.search(r'NAME="([^"]*)"', attrs_str)
-        if name_match:
-            attrs["name"] = name_match.group(1)
+        name = quoted_attr(values, "NAME")
+        if name is not None:
+            attrs["name"] = name
 
         G.add_node(node_id, **attrs)
 
@@ -101,7 +124,8 @@ def load_graph_from_dot(dot_file: str) -> nx.MultiDiGraph:
         src = match.group(1)
         dst = match.group(2)
         label = match.group(3)
-        G.add_edge(src, dst, edge_type=label)
+        if G.has_node(src) and G.has_node(dst):
+            G.add_edge(src, dst, edge_type=label)
 
     print(f"[Graph] 从 DOT 加载完成: {G.number_of_nodes()} 节点, {G.number_of_edges()} 边")
     return G

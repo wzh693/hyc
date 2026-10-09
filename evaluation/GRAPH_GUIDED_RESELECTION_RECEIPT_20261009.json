@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-09",
+  "selection": "type_coverage_reconstructed_20261008",
+  "editable_source": "development/type_coverage_reconstructed_20261008/src",
+  "frozen_reference": "baselines/type_coverage_reconstructed_20261008/baseline.json",
+  "source_files_matching_frozen_reference": 47,
+  "source_restoration": [
+    {
+      "file": "config.py",
+      "before_sha256": "195131fa8514ac4e0572f7ba5b3aa814d833173fa0a1bc680e30b08acb584156",
+      "after_sha256": "1a40a6c19e4089205d13917094040916067b329e4799ab03ac93a52ee1ac3daf"
+    },
+    {
+      "file": "linearization/typed_paths.py",
+      "before_sha256": "a8fed775dc80f811fdc2e5e92b2325427f45ae14622ae6bf066b95b31c1e28c5",
+      "after_sha256": "57150688b29ea79dc7e304bc4ea43af628e71945c091eb045ea42835f4a9a3ad"
+    }
+  ],
+  "candidate_snapshot_preserved": "output/sven_complete_src_eval_20261008/code_snapshot",
+  "historical_tooling_snapshot_preserved": "output/sven_complete_src_eval_20261008/tooling_snapshot",
+  "verification": {
+    "local_top_level_regressions_passed": 195,
+    "published_package_tests_passed_separately": 5,
+    "nested_isolated_tests_not_added_to_top_level_count": "3 active-foundation checks and 6 archived-candidate checks",
+    "initial_new_test_failure": "Inventory comparison treated one historical forward-slash path differently from Windows paths; normalized separators in test tooling only, then all tests passed.",
+    "archived_experiment_results_recomputed": 1016,
+    "archived_invocations_verified": 1017,
+    "archived_first_requests_verified": 1016,
+    "archived_source_only_pairs_verified": 508,
+    "archived_quality_gate_passed": false,
+    "root_and_preserved_repaired_source_files_verified": 52,
+    "published_source_files_verified": 47,
+    "new_api_calls": 0,
+    "new_quality_score": null,
+    "full_508_row_historical_replay_repeated": false
+  },
+  "git": {
+    "head_preserved": "840de8af33429eed4503baf0633e6ae82e6d4c1d",
+    "index_remains_empty": true,
+    "new_commit_or_push": false
+  },
+  "current_tooling_sha256": {
+    "evaluation/select_graph_guided_foundation.ps1": "3db23326966248fc16bc24b738bf7c0ffa358592a60b95cbc69d7cb2ebc17090",
+    "evaluation/test_graph_guided_foundation.py": "7b7e608e558850a4d4aadd72ff98ea2bf3c8487c2ead60aee4711e38649e27d2",
+    "evaluation/audit_sven_complete_src.py": "b1109f85e7104ed7ad68ec55ee86793b651a37fa3f040cf3ec5f86c35435949f",
+    "evaluation/test_sven_complete_src.py": "4570b2a995342376d4dc5b531edfa4dfe68f2331f0a955666f131706c4eee076"
+  },
+  "prior_artifact_sha256_preserved": {
+    "manifest.json": "ccf1114c03c1b7f335ef730b9062c2cf6f17c8a41b62938e0e2290635ea267f4",
+    "results.jsonl": "1dca5d66d18e868b5a9c051c6a65f29f93301260790862519bdeffcb045fb135",
+    "report.json": "c709e3d8a8af15995f2f199ac2b0255801c40374f87d0f14f03c1b997eaaf91a",
+    "api_receipts.jsonl": "7e19c1d83257ec3ade67269d5cdb31a90f9c7170f0af93688face72b684b9060"
+  },
+  "next_step": "Offline provenance/survival audit of read target, offset/width/capacity updates and same-target guards through CPG/compression/path retrieval/SRC/DEP; no new prediction candidate activated.",
+  "live_test_authorized": false,
+  "independent_final_test_completed": false,
+  "submission_ready": false
+}

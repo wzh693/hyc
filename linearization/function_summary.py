@@ -60,20 +60,21 @@ def summarize_function(code: str) -> str:
     if found_free:
         summary_parts.append(f"[FREE] {', '.join(found_free)}")
 
-    # —— 配对检测：ALLOC 无 FREE → 内存泄漏 ——
+    # Function-local absence of free is not proof of a leak: ownership may be
+    # returned or transferred to the caller. Keep it as neutral context only.
     if found_alloc and not found_free:
         summary_parts.append(
-            "[LEAK] alloc without free in function scope"
+            "[OWNERSHIP] allocation has no local release; verify return/transfer paths"
         )
 
-    # —— 条件释放检测：free 在 if 块内 → 潜在 UAF ——
+    # Conditional cleanup alone is not UAF; a post-free use must be established.
     if found_free:
         for i, line in enumerate(lines):
             if re.search(r'\b(?:free|av_free|av_freep|kfree|munmap)\b', line.lower()):
                 for j in range(max(0, i - 5), i):
                     if "if" in lines[j].lower():
                         summary_parts.append(
-                            "[UAF-RISK] free() inside conditional branch"
+                            "[COND-FREE] release occurs near a conditional; verify later uses"
                         )
                         break
                 break

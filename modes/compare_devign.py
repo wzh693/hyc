@@ -9,7 +9,7 @@ import json
 import time
 import random
 
-from config import LLM_MODEL, SEED
+from config import LLM_MODEL, SEED, DEVIGN_JSON_PATH, DEVIGN_ENHANCE_DIR
 from graph.build_cpg import build_cpg, find_export_files
 from graph.load_graph import load_graph
 from graph.summarize_graph import summarize_graph
@@ -19,26 +19,16 @@ from linearization.function_summary import summarize_function
 from linearization.block_summary import summarize_block
 from reasoning.llm_api import create_client
 from reasoning.reasoning_loop import reasoning_loop
-from planning.state_memory import ProgramState
+from reasoning.reasoning_loop import parse_binary_verdict
 
 DEFAULT_TOKEN_BUDGET = 4096  # 恢复 4096，单独测随机抽样影响
 
 
 def _calc_metrics(results):
     """Helper to compute classification metrics."""
-    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-    valid = [r for r in results if r.get("prediction") is not None]
-    if not valid:
-        return {"accuracy": 0, "precision": 0, "recall": 0, "f1": 0, "n": 0}
-    yt = [r["target"] for r in valid]
-    yp = [r["prediction"] for r in valid]
-    return {
-        "accuracy": accuracy_score(yt, yp),
-        "precision": precision_score(yt, yp, zero_division=0),
-        "recall": recall_score(yt, yp, zero_division=0),
-        "f1": f1_score(yt, yp, zero_division=0),
-        "n": len(valid),
-    }
+    from evaluation.metrics import compute_metrics
+    return compute_metrics([r['target'] for r in results],
+                           [r.get('prediction') for r in results])
 
 
 def _pipeline_fingerprint() -> str:
@@ -52,13 +42,21 @@ def _pipeline_fingerprint() -> str:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     files = [os.path.join(root, "config.py"),
              os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare_devign.py")]
+    # Only prediction-path modules belong here. Dataset preparation/loaders do
+    # not alter a prediction for an already identified sample; including them
+    # invalidated costly LLM results after harmless cache-tool changes.
     for d in ("graph", "retrieval", "linearization", "reasoning",
-              "learning", "planning", "data"):
+              "learning", "planning"):
         p = os.path.join(root, d)
         if os.path.isdir(p):
             files.extend(os.path.join(p, fn) for fn in sorted(os.listdir(p))
                          if fn.endswith(".py"))
     h = hashlib.md5()
+    # Model/provider changes must not silently reuse another model's predictions.
+    import config as runtime_config
+    h.update(json.dumps({'model': runtime_config.LLM_MODEL,
+                         'base_url': runtime_config.LLM_BASE_URL},
+                        sort_keys=True).encode())
     for f in sorted(files):
         try:
             with open(f, "rb") as fh:
@@ -66,130 +64,53 @@ def _pipeline_fingerprint() -> str:
                 h.update(fh.read())
         except OSError:
             pass
-    # 消融隔离（2026-09-23）：HGL_ABL 混入指纹——四个消融配置各自独立
-    # 指纹，resume 预测复用自动隔离（防错误 env 续跑导致配置间结果串批）。
-    h.update(("HGL_ABL=" + os.environ.get("HGL_ABL", "")).encode())
+    # Every runtime switch that changes predictions must participate in resume
+    # isolation.  In particular, baseline and learned/GAT SVEN runs otherwise
+    # look identical to the old fingerprint and silently reuse one another.
+    for name in (
+        "HGL_ABL",
+        "NODE_IMPORTANCE_BACKEND",
+        "USE_LEARNED_NODE_IMPORTANCE",
+        "USE_LEARNED_SUMMARIZE",
+        "USE_LEARNED_PATH_RANK",
+        "MAX_REASONING_STEPS",
+        "STEP1_CONFIRM_STOP",
+        "SOURCE_SLICE_ASSIGNMENT_FIX",
+        "COMPACT_THREE_PART_CONTEXT",
+        "USE_LLM_ARBITRATION",
+        "SELECTIVE_SECOND_PASS",
+        "F1_EVIDENCE_ROUTING",
+        "STRUCTURED_PRIOR_SUMMARY",
+        "COMPACT_VERDICT_PROMPT",
+        "FOCUSED_GRAPH_ANCHORS",
+        "TYPE_COVERAGE_PROMPT",
+        "TYPE_COVERAGE_ROUTING",
+        "USE_ZERO_TOKEN_SECURITY_NET",
+        "SECURITY_NET_THRESHOLD",
+        "GRAPH_SECURITY_NET",
+        "USE_BACKWARD_SLICE", "BOUNDED_OUTPUT_CONTRACT", "EVIDENCE_EXPANSION",
+        "STRICT_OPERATION_TAGS",
+    ):
+        h.update(f"{name}={os.environ.get(name, '')}".encode())
+
+    checkpoint = os.environ.get(
+        "GAT_MODEL_PATH", os.path.join(root, "learning", "model", "gat_mil.pt")
+    )
+    try:
+        with open(checkpoint, "rb") as fh:
+            h.update(b"GAT_MODEL=")
+            h.update(hashlib.sha256(fh.read()).digest())
+    except OSError:
+        h.update(b"GAT_MODEL=missing")
     return h.hexdigest()
 
 
 def _run_hgl_pipeline(code_path, code, sample_id, sample_dir, llm_client, token_budget):
-    """运行 HGL-Vul 管线。
+    """Compatibility adapter; all entry points delegate to graph.pipeline."""
+    from graph.pipeline import run_hgl_pipeline
+    return run_hgl_pipeline(code_path, code, sample_id, sample_dir, llm_client, token_budget)
 
-    返回 (prediction, conclusion, tokens_used, arbitrate_record)；
-    arbitrate_record 为 v19 仲裁层的结构化记录（triggered/verdict/
-    flipped/note 等），由调用方写入结果 JSON。
-    """
-    os.makedirs(sample_dir, exist_ok=True)
-    try:
-        export_dir = build_cpg(code_path, sample_dir)
-        nodes_file, edges_file = find_export_files(export_dir)
-    except Exception:
-        nodes_file = os.path.join(sample_dir, "nodes.json")
-        edges_file = os.path.join(sample_dir, "edges.json")
-        if not os.path.exists(nodes_file):
-            raise
-    G = load_graph(nodes_file, edges_file)
 
-    # ── 技术点①②：学习式节点重要性（全图打分一次，两处复用）──
-    from learning.scorer import score_nodes, summarize_enabled, path_rank_enabled
-    learned = score_nodes(G, code)
-
-    # ── 消融开关（2026-09-23，v22.1 冻结代码之上的运行时开关；HGL_ABL
-    # 未设置时四条路径均与 v22.1 逐字节等价，默认行为零变化）──
-    _abl = os.environ.get("HGL_ABL", "")
-    if _abl == "no_compression":
-        # ① 漏洞感知图压缩关闭：跳过 summarize_graph，路径检索/推理/
-        # 仲裁直接在完整 CPG 上（上下文层 SRC/DEP 有硬预算上限，token
-        # 不会失控，消融效应体现在证据质量与选择偏差上）
-        SG = G
-    else:
-        # v17（BUG-10）：source_code 接线——激活 detect_vuln_type_hint +
-        # VULN_CONDITIONAL_WEIGHTS（UAF/DoubleFree/Overflow/NullDeref/FmtStr
-        # 六维差异化权重），此前主实验路径恒用 Generic 权重。仅影响图压缩
-        # 节点选择（类型相关证据链存活率），不触碰 prompt/切片/标签——
-        # 单变量纪律：与 v16 的唯一差异就是这一处接线。
-        SG = summarize_graph(G, token_budget=token_budget, source_code=code,
-                             learned_scores=learned if summarize_enabled() else None)
-    # BUG-09 修复：回退路径来自 G 时 rank/序列化/兜底全用 SG 会取空节点。
-    # 统一 path_graph，路径来源与打分/序列化用同一图对象。
-    sg_paths = extract_all_candidate_paths(SG, source_code=code)
-    if sg_paths:
-        path_graph, candidate_paths = SG, sg_paths
-    else:
-        candidate_paths = extract_all_candidate_paths(G, source_code=code)
-        path_graph = G
-    if _abl == "no_topk":
-        # ② 智能路径检索关闭：Top-K 启发式排序 → 等量随机替代（研究计划
-        # 口径：随机替代而非删除，控制路径数量这一变量）。局部 Random 按
-        # sample_id 种子——可复现且不污染全局随机源（random.seed 教训）。
-        from config import TOP_K_PATHS
-        _rng = random.Random(f"abl_topk:{sample_id}")
-        _k = min(TOP_K_PATHS, len(candidate_paths))
-        topk = _rng.sample(candidate_paths, _k) if _k else []
-        print(f"[ABL:no_topk] 随机替代 Top-K: {len(topk)}/{len(candidate_paths)} 条")
-    else:
-        topk = retrieve_topk(path_graph, candidate_paths,
-                             learned_scores=learned if path_rank_enabled() else None)
-
-    # ── Fix 2: 保留所有块摘要 ──
-    func_summary = summarize_function(code)
-    blocks = code.split("\n\n")
-    block_summaries = {}
-    for j, blk in enumerate(blocks):
-        stripped = blk.strip()
-        if stripped:
-            block_summaries[j] = summarize_block(stripped) or stripped[:80]
-
-    # v15/v16（BUG-03/19）：原 Fix 1/Fix 5 在此构建 paths_context（多行详细
-    # 序列化 + 函数级 api_hints 全局标注）但从未传入 reasoning_loop——
-    # 死代码，已删。其意图（带安全标签的路径证据进入 LLM 上下文）改由
-    # build_hierarchical_context Step1 DEP 层落地：_labeled_compact_path
-    # 节点级标签 + path_evidence_tags 路径级证据头（仅本路径实际命中的
-    # API；函数级全局标注会放大良性样本的危险信号，见 BUG-19）。
-    # v16 回退 v15 的 SAFE 缓解层（安全锚点双刃剑：TP→FN 12 崩 Rec）。
-
-    # ── Fix 3: 程序状态 ──
-    state = ProgramState()
-    state.track_vars(code)
-
-    # BUG-09 修复：reasoning_loop 的图序列化同样使用路径同源图
-    reasoning_result = reasoning_loop(
-        path_graph, topk, code, func_summary, block_summaries,
-        client=llm_client,
-    )
-    conclusion = reasoning_result.get("conclusion", "").lower()
-    vul_type = reasoning_result.get("vulnerability_type", "Unknown")
-    tokens_used = reasoning_result.get("tokens_used", 0)
-    result = 1 if vul_type != "Unknown" else 0
-
-    # v19（图特征仲裁层）：主推理（自由形式）出预测后，图结构事实
-    # （guard_dom_pairs：sink + 对齐守卫）经受限二元精审仲裁——分歧时
-    # 信精审（试点：分歧区精审 83% vs 主判断 17%，两批一致 +4 Acc，
-    # 触发 6%/批 × 118 tok）。图不进 Step1 上下文（v18 三次双刃剑教训）。
-    # 消融 no_arbitrate（2026-09-23）：仲裁层关闭，直接采用主推理预测。
-    main_pred = result
-    if _abl == "no_arbitrate":
-        audit_tok, audit_note, audit_info = 0, "", {"triggered": False, "verdict": None}
-    else:
-        from graph.arbitrate import arbitrate
-        result, audit_tok, audit_note, audit_info = arbitrate(path_graph, topk, result,
-                                                              client=llm_client)
-    tokens_used += audit_tok
-    if audit_note:
-        print(f"  {audit_note}")
-        conclusion = (conclusion + " " + audit_note) if conclusion else audit_note
-    # v20（持久化缺陷修复）：仲裁记录结构化落盘——v19 时 FLIP 信息只混在
-    # raw_answer 自由文本 + print 日志里，归因需日志对齐还原；全集规模的
-    # 归因必须由结果 JSON 自带结构化字段。
-    # v21：补记 vulnerability_type（v20 归因时发现未持久化，兜底/具体类型
-    # 归属只能靠 raw_answer 重放解析器）。
-    arb_record = dict(audit_info)
-    arb_record.update({"main_pred": main_pred, "final_pred": result,
-                       "flipped": result != main_pred,
-                       "audit_tokens": audit_tok, "note": audit_note,
-                       "vulnerability_type": vul_type})
-    print(f"  [DEBUG] vul_type={vul_type} tokens={tokens_used} conclusion_preview={conclusion[:100]}")
-    return (result, conclusion, tokens_used, arb_record)
 
 
 def mode_compare_devign(
@@ -220,18 +141,7 @@ def mode_compare_devign(
     _abl = os.environ.get("HGL_ABL", "")
     if _abl:
         print(f"  Ablation:      {_abl}")
-        # 消融 single_step（2026-09-23）：③ 自适应多步推理关闭——步数 2→1。
-        # patch 模块级常量（reasoning_loop 以模块全局引用 MAX_REASONING_STEPS，
-        # 运行期替换对循环边界与 is_final 判定同时生效）。
-        # 注意：必须经 sys.modules 取模块——reasoning/__init__.py 的
-        # `from reasoning.reasoning_loop import reasoning_loop` 把**函数**
-        # 绑到包属性 reasoning.reasoning_loop 上遮蔽了子模块，Py3.13 的
-        # `import reasoning.reasoning_loop as x` 经 getattr 会拿到函数，
-        # 在函数对象上挂属性静默无效（冒烟实测 Step 1/2 复现）。
-        if _abl == "single_step":
-            sys.modules["reasoning.reasoning_loop"].MAX_REASONING_STEPS = 1
-            print(f"  [ABL] MAX_REASONING_STEPS -> 1 "
-                  f"(now={sys.modules['reasoning.reasoning_loop'].MAX_REASONING_STEPS})")
+        # Per-call max_steps is applied by the shared pipeline; no global mutation.
 
     # BUG-11：管线指纹（resume 预测复用校验用）
     pipeline_fp = _pipeline_fingerprint()
@@ -239,14 +149,14 @@ def mode_compare_devign(
 
     # Step 1: 加载数据
     if devign_json is None:
-        candidate = r"C:\Users\wzh13\Desktop\Network Security Research\Enhancing Vulnerability Detection via Inter-procedural Semantic CompletionEnhancing Vulnerability Detection via Inter-procedural Semantic Completion\data\origin-20260913T072238Z-1-001\origin\devign.json"
+        candidate = DEVIGN_JSON_PATH
         if os.path.exists(candidate):
             devign_json = candidate
         else:
-            print("[Error] 未指定 devign_json 路径，请通过参数传入")
+            print("[Error] 未指定 devign_json 路径，请设置 DEVIGN_JSON_PATH 或调用参数")
             sys.exit(1)
     if enhance_dir is None:
-        candidate = r"C:\Users\wzh13\Desktop\Network Security Research\Enhancing Vulnerability Detection via Inter-procedural Semantic CompletionEnhancing Vulnerability Detection via Inter-procedural Semantic Completion\data\enhance-20260913T072240Z-1-001\enhance\devign"
+        candidate = DEVIGN_ENHANCE_DIR
         if os.path.exists(candidate):
             enhance_dir = candidate
         else:
@@ -361,15 +271,13 @@ Is this code vulnerable? Answer with exactly one word: "vulnerable" or "benign".
             # vulnerability" 误判为漏洞（基线 Direct LLM 虚高 FP）。先排除
             # 否定/良性表述，再判漏洞词。词级匹配避免 "unsafe" 命中 "safe"
             # （_SAFE_RE 同款教训）。
-            words = set(ans.replace(".", " ").replace(",", " ").split())
-            is_safe = ("benign" in words or "safe" in words
-                       or "not" in words or "no" in words)
-            result["prediction"] = 0 if is_safe else (1 if "vulnerable" in ans else 0)
+            result["prediction"] = parse_binary_verdict(ans)
+            if result["prediction"] is None:
+                raise ValueError(f"Ambiguous verdict: {ans[:120]!r}")
             result["raw_answer"] = ans
             result["tokens_used"] = resp.usage.total_tokens if resp.usage else 0
         except Exception as e:
-            # BUG-12：异常样本不计入指标（None 会被 _calc_metrics 过滤），
-            # 不再静默落成 prediction=0 压低 Rec
+            # Preserve abstentions/errors in the full scheduled denominator.
             result["error"] = str(e)
             result["prediction"] = None
 
@@ -420,7 +328,7 @@ Is this code vulnerable? Answer with exactly one word: "vulnerable" or "benign".
             result["tokens_used"] = tok
             result["arbitrate"] = arb
         except Exception as e:
-            # BUG-12：异常样本不计入指标
+            # Errors remain scheduled rows and count conservatively.
             result["error"] = str(e)
             result["prediction"] = None
 
@@ -436,7 +344,7 @@ Is this code vulnerable? Answer with exactly one word: "vulnerable" or "benign".
     m_a = _calc_metrics(results_a)
     m_b = _calc_metrics(results_b)
 
-    # BUG-12：异常样本显式统计（None 已被 _calc_metrics 剔除，此处报告口径）
+    # Report errors explicitly; they are retained by _calc_metrics.
     err_a = sum(1 for r in results_a if r.get("error"))
     err_b = sum(1 for r in results_b if r.get("error"))
     if err_a or err_b:

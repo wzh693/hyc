@@ -1,0 +1,31 @@
+{
+  "name": "whole_graph_evidence_v2_20261009",
+  "default_selected": false,
+  "source_files": 48,
+  "changed_foundation_modules": ["linearization/typed_paths.py"],
+  "added_modules": ["linearization/evidence_cards.py"],
+  "offline_full_rows": 254,
+  "offline_mock_requests": 508,
+  "offline_independent_verification_passed": true,
+  "runtime_mock_requests": 1016,
+  "runtime_preflight_passed": true,
+  "planned_real_results": 1016,
+  "authorization_status": "single_batch_complete_consumed",
+  "real_results_root": "output/graph_evidence_cards_llm1016_20261009",
+  "source_hash_manifest": "output/graph_evidence_cards_preflight_v2_20261009/manifest.json",
+  "prediction_score": {
+    "scope": "254 exposed development SVEN rows per repeat; not independent test",
+    "f1": [0.6301369863013698, 0.5958904109589042],
+    "accuracy": [0.5748031496062992, 0.5354330708661418],
+    "cwe125_accuracy": [0.7142857142857143, 0.6483516483516484]
+  },
+  "actual_model_invocations": 1020,
+  "reported_tokens": 876224,
+  "independent_llm_audit_passed": true,
+  "quality_gates_passed": 1,
+  "quality_gates_failed": 4,
+  "future_llm_test_authorized": false,
+  "automatic_promotion": false,
+  "automatic_reruns": false,
+  "github_upload_authorized": false
+}

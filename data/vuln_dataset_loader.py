@@ -319,7 +319,9 @@ class VulnDatasetLoader:
 
         # 添加显式边（from edges.jsonl）
         for e in edges:
-            G.add_edge(e["src"], e["dst"], edge_type=e.get("edge_type", "?"))
+            src, dst = e.get("src"), e.get("dst")
+            if src in nodes and dst in nodes:
+                G.add_edge(src, dst, edge_type=e.get("edge_type", "?"))
 
         # 同时从节点内联边补充（如果 edges.jsonl 不完整）
         # 有些边直接存储在节点的 *_successors / *_predecessors 字段中
@@ -334,8 +336,12 @@ class VulnDatasetLoader:
                 successors = node_data.get(field, [])
                 for succ in successors:
                     if succ and succ in nodes:
-                        # 检查边是否已存在
-                        if not G.has_edge(nid, succ):
+                        existing = G.get_edge_data(nid, succ, default={})
+                        has_same_type = any(
+                            data.get("edge_type") == edge_type
+                            for data in existing.values()
+                        )
+                        if not has_same_type:
                             G.add_edge(nid, succ, edge_type=edge_type)
 
         # 图级元数据
@@ -360,7 +366,9 @@ class VulnDatasetLoader:
 if __name__ == "__main__":
     # 快速测试
     import sys
-    dataset_dir = sys.argv[1] if len(sys.argv) > 1 else r"C:\Users\wzh13\Desktop\Network Security Research\vuln-dataset-main"
+    if len(sys.argv) <= 1:
+        raise SystemExit("Usage: python -m data.vuln_dataset_loader <dataset_dir>")
+    dataset_dir = sys.argv[1]
     loader = VulnDatasetLoader(dataset_dir)
     manifest = loader.load_manifest()
     print(f"  Manifest: {manifest.get('totals', {})}")

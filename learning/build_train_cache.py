@@ -17,10 +17,10 @@ import random
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import SEED
+from config import SEED, DEVIGN_JSON_PATH
 from graph.build_cpg import build_cpg, find_export_files
 
-DEVIGN_JSON = r"C:\Users\wzh13\Desktop\Network Security Research\devign\function.json"
+DEVIGN_JSON = DEVIGN_JSON_PATH
 
 CACHE_DIR = os.path.join("output", "train_cpg")
 MIN_BYTES = 1500
@@ -28,6 +28,8 @@ MIN_BYTES = 1500
 
 def main(n_vuln=300, n_benign=300):
     from data.devign_loader import DevignLoader
+    if not DEVIGN_JSON:
+        raise ValueError("Set DEVIGN_JSON_PATH to the Devign JSON file")
 
     os.makedirs(CACHE_DIR, exist_ok=True)
     meta_path = os.path.join(CACHE_DIR, "meta.json")

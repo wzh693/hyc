@@ -405,15 +405,18 @@ def rank_paths(G: nx.MultiDiGraph, paths: list, top_k: int = 0, vuln_type: str =
     scored_paths.sort(key=lambda x: x[0], reverse=True)
 
     if top_k > 0:
-        # 带多样性惩罚的 Top-K 选择
-        diversity_penalized = []
-        for s, p in scored_paths:
-            penalty = _compute_path_diversity_penalty(diversity_penalized, p)
-            s -= penalty
-            diversity_penalized.append((s, p))
-
-        import heapq
-        result = heapq.nlargest(top_k, diversity_penalized, key=lambda x: x[0])
+        # Greedy diverse Top-K: penalties must be computed only against paths that
+        # actually entered the result, not every higher-ranked discarded candidate.
+        remaining = list(scored_paths)
+        result = []
+        while remaining and len(result) < top_k:
+            best_i, best_score = 0, float("-inf")
+            for i, (base_score, path) in enumerate(remaining):
+                adjusted = base_score - _compute_path_diversity_penalty(result, path)
+                if adjusted > best_score:
+                    best_i, best_score = i, adjusted
+            _, best_path = remaining.pop(best_i)
+            result.append((best_score, best_path))
     else:
         result = scored_paths
 

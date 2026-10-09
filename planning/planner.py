@@ -105,12 +105,12 @@ class RetrievalPlanner:
         else:
             best_action = self._apply_heuristics(best_action)
 
-        self.action_history.append(best_action)
-        self._update_expansion_state(best_action)
-
         if self.step >= 10:
             print("[Planner] 达到最大步数限制，强制汇总证据")
-            return "SummarizeEvidence"
+            best_action = "SummarizeEvidence"
+
+        self.action_history.append(best_action)
+        self._update_expansion_state(best_action)
 
         return best_action
 

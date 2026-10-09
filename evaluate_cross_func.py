@@ -148,7 +148,8 @@ def process_sample(
 
     # Phase 2: 图压缩（核心！大规模 CPG 必须压缩）
     t2 = time.time()
-    SG = summarize_graph(G, token_budget=token_budget, verbose=verbose)
+    SG = summarize_graph(G, token_budget=token_budget,
+                         source_code=sample.source_code or "", verbose=verbose)
     t_summarize = time.time() - t2
     reduction_stats = SG.graph.get("reduction_stats", {})
     node_reduction = reduction_stats.get("node_reduction_pct", 0)
@@ -164,11 +165,13 @@ def process_sample(
 
     # Phase 3: 路径检索
     t3 = time.time()
-    candidate_paths = extract_all_candidate_paths(SG)
+    candidate_paths = extract_all_candidate_paths(SG, source_code=sample.source_code or "")
+    path_graph = SG
     if not candidate_paths:
-        candidate_paths = extract_all_candidate_paths(G)
+        candidate_paths = extract_all_candidate_paths(G, source_code=sample.source_code or "")
+        path_graph = G
     topk_paths = retrieve_topk(
-        SG if candidate_paths else G,
+        path_graph,
         candidate_paths,
         k=min(TOP_K_PATHS, 10),
     )
@@ -189,11 +192,10 @@ def process_sample(
             block_summaries[j] = summarize_block(block)
 
     # 类型化依赖路径
-    graph_for_paths = SG if SG.number_of_nodes() > 10 else G
     paths_context = []
     for path in topk_paths[:5]:
         try:
-            path_str = typed_dependency_path(graph_for_paths, path)
+            path_str = typed_dependency_path(path_graph, path)
             if path_str:
                 paths_context.append(path_str)
         except Exception:
@@ -316,8 +318,9 @@ def generate_report(results: list) -> str:
 
 
 if __name__ == "__main__":
-    dataset_dir = sys.argv[1] if len(sys.argv) > 1 else \
-        r"C:\Users\wzh13\Desktop\Network Security Research\vuln-dataset-main"
+    if len(sys.argv) <= 1:
+        raise SystemExit("Usage: python evaluate_cross_func.py <dataset_dir> [max_samples] [max_nodes]")
+    dataset_dir = sys.argv[1]
     max_samples = int(sys.argv[2]) if len(sys.argv) > 2 else 10
     max_nodes = int(sys.argv[3]) if len(sys.argv) > 3 else 3000
 

@@ -12,6 +12,23 @@ class GraphEngine:
     def __init__(self, G: nx.MultiDiGraph):
         self.G = G
 
+    def _bidirectional(self, node_id, max_hop, edge_types, max_paths):
+        if max_paths < 0 or max_hop < 0:
+            raise ValueError('Traversal limits must be nonnegative')
+        forward, backward = [], []
+        self._dfs_typed(node_id, [node_id], max_hop, edge_types, forward,
+                        direction='out', max_paths=max_paths)
+        self._dfs_typed(node_id, [node_id], max_hop, edge_types, backward,
+                        direction='in', max_paths=max_paths)
+        # Interleave so a downstream prefix cap cannot starve the reverse side.
+        paths, seen = [], set()
+        for i in range(max(len(forward), len(backward))):
+            for side in (forward, backward):
+                if i < len(side) and tuple(side[i]) not in seen:
+                    paths.append(side[i])
+                    seen.add(tuple(side[i]))
+        return paths
+
     def expand_dataflow(self, node_id: str, max_hop: int = 6, max_paths: int = 200) -> list:
         """
         沿数据流边（DFG/REACHING_DEF）双向扩展。
@@ -19,30 +36,19 @@ class GraphEngine:
         支持双向扩展：前向（out_edges）和后向（in_edges）。
         max_paths: 防爆上限——稠密图 hop=6 可枚举出数十万条路径而下游只用前 20 条。
         """
-        paths = []
-        # 前向扩展
-        self._dfs_typed(node_id, [node_id], max_hop, {"REACHING_DEF", "DFG"}, paths, direction="out", max_paths=max_paths)
-        # 后向扩展（反向数据流，如赋值语句的左侧变量溯源）
-        self._dfs_typed(node_id, [node_id], max_hop, {"REACHING_DEF", "DFG"}, paths, direction="in", max_paths=max_paths)
-        return paths
+        return self._bidirectional(node_id, max_hop, {'REACHING_DEF', 'DFG'}, max_paths)
 
     def expand_controlflow(self, node_id: str, max_hop: int = 6, max_paths: int = 200) -> list:
         """
         沿控制流边（CFG）双向扩展。
         """
-        paths = []
-        self._dfs_typed(node_id, [node_id], max_hop, {"CFG"}, paths, direction="out", max_paths=max_paths)
-        self._dfs_typed(node_id, [node_id], max_hop, {"CFG"}, paths, direction="in", max_paths=max_paths)
-        return paths
+        return self._bidirectional(node_id, max_hop, {'CFG'}, max_paths)
 
     def expand_call(self, node_id: str, max_hop: int = 4, max_paths: int = 200) -> list:
         """
         沿调用边（CALL）双向扩展，用于跨函数分析。
         """
-        paths = []
-        self._dfs_typed(node_id, [node_id], max_hop, {"CALL"}, paths, direction="out", max_paths=max_paths)
-        self._dfs_typed(node_id, [node_id], max_hop, {"CALL"}, paths, direction="in", max_paths=max_paths)
-        return paths
+        return self._bidirectional(node_id, max_hop, {'CALL'}, max_paths)
 
     def retrieve_alias(self, node_id: str, max_hop: int = 4, max_paths: int = 200) -> list:
         """
@@ -51,11 +57,7 @@ class GraphEngine:
         max_paths: 与其他动作一致的上限（审查报告性能项：原无上限，
         双向扩展在 REF 密集图上可组合爆炸）。
         """
-        paths = []
-        self._dfs_typed(node_id, [node_id], max_hop, {"ALIAS_OF", "REF"}, paths, direction="out")
-        if len(paths) < max_paths:
-            self._dfs_typed(node_id, [node_id], max_hop, {"ALIAS_OF", "REF"}, paths, direction="in")
-        return paths[:max_paths]
+        return self._bidirectional(node_id, max_hop, {'ALIAS_OF', 'REF'}, max_paths)
 
     def check_reachability(self, source: str, sink: str) -> bool:
         """
@@ -71,7 +73,7 @@ class GraphEngine:
         """
         try:
             return nx.shortest_path(self.G, source, sink)
-        except nx.NetworkXNoPath:
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
             return []
 
     def find_all_paths(self, source: str, sink: str, cutoff: int = 5) -> list:
@@ -80,7 +82,7 @@ class GraphEngine:
         """
         try:
             return list(nx.all_simple_paths(self.G, source, sink, cutoff=cutoff))
-        except nx.NetworkXNoPath:
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
             return []
 
     def get_neighbors(self, node_id: str, edge_types: set = None) -> list:
@@ -88,6 +90,8 @@ class GraphEngine:
         获取邻居节点，可按边类型过滤。
         """
         neighbors = []
+        if not self.G.has_node(node_id):
+            return neighbors
         for _, nxt, edata in self.G.out_edges(node_id, data=True):
             if edge_types is None or edata.get("edge_type") in edge_types:
                 neighbors.append(nxt)
@@ -124,6 +128,8 @@ class GraphEngine:
         """
         if remaining_hop <= 0:
             return
+        if not self.G.has_node(node):
+            return
         if max_paths and len(results) >= max_paths:
             return
 
@@ -139,8 +145,12 @@ class GraphEngine:
             edges = self.G.in_edges(node, data=True)
             
         for src, dst, edata in edges:
+            if max_paths and len(results) >= max_paths:
+                return
             if edata.get("edge_type") in edge_types:
                 nxt = dst if direction == "out" else src
+                if nxt in _visited:
+                    continue
                 # 后向扩展时前驱插到路径头部，保证相邻节点间的边在图中真实存在；
                 # 否则追加到尾部会导致 get_edge_data 反查失败，序列化时边全部显示 "?"
                 if direction == "out":

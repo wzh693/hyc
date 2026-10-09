@@ -360,9 +360,9 @@ def _adjust_threshold_for_budget(
         if t_est <= token_budget:
             best_threshold = mid
             best_tokens = t_est
-            lo = mid + 0.1
-        else:
             hi = mid
+        else:
+            lo = mid
             if iteration >= 14:  # 最后迭代仍超标，记录最佳
                 if t_est < best_tokens:
                     best_threshold = mid
@@ -578,18 +578,30 @@ def summarize_graph(
     # 技术点①：学习式压缩（learned_scores 启用）时施加恢复上限，
     # 防止激进收缩后恢复机制绕过预算回填过多节点（图膨胀反例实证）。
     # 基线（learned_scores=None）行为保持不变（单变量实验纪律）。
-    restore_cap = (max(15, int(len(keep_nodes) * 0.3))
-                   if learned_scores else None)
+    restore_cap = None
+    if learned_scores:
+        restore_cap = max(15, int(len(keep_nodes) * 0.3))
+    if token_budget is not None and token_budget > 0:
+        budget_room = max(0, int(token_budget * 1.2 / NODE_TOKEN_ESTIMATE) - len(keep_nodes))
+        restore_cap = budget_room if restore_cap is None else min(restore_cap, budget_room)
     restored = 0
     # BUG-21 修复：set → list 顺序随 PYTHONHASHSEED 变化，先恢复的 pair
     # 先得节点 → SG 跨进程不可复现。排序后迭代。
-    force_list = sorted(force_keep, key=lambda x: int(x) if str(x).isdigit() else 0)
+    force_list = sorted(capped_force_keep,
+                        key=lambda x: (0, int(x)) if str(x).isdigit() else (1, str(x)))
     if len(force_list) <= 80:
         force_pairs = [(force_list[i], force_list[j]) for i in range(len(force_list)) for j in range(i + 1, len(force_list))]
     else:
-        import random as _rng
-        _rng.seed(42)
-        force_pairs = _rng.sample([(force_list[i], force_list[j]) for i in range(len(force_list)) for j in range(i + 1, min(i + 6, len(force_list)))], min(2000, len(force_list) * 5))
+        import random
+        _rng = random.Random(42)
+        pair_population = [
+            (force_list[i], force_list[j])
+            for i in range(len(force_list))
+            for j in range(i + 1, min(i + 6, len(force_list)))
+        ]
+        force_pairs = _rng.sample(
+            pair_population, min(2000, len(pair_population))
+        )
     for u, v in force_pairs:
         if restore_cap is not None and restored >= restore_cap:
             break
@@ -605,12 +617,52 @@ def summarize_graph(
                             restored += 1
                     for pi in range(len(path) - 1):
                         a, b = path[pi], path[pi + 1]
-                        if not SG.has_edge(a, b) and G.has_edge(a, b):
+                        # Never let add_edge auto-create attribute-less nodes when the
+                        # restore cap stopped node insertion midway through a path.
+                        if (SG.has_node(a) and SG.has_node(b)
+                                and not SG.has_edge(a, b) and G.has_edge(a, b)):
                             edge_data = G.get_edge_data(a, b)
                             for key, edata in edge_data.items():
                                 SG.add_edge(a, b, key=key, **edata)
                 except nx.NetworkXNoPath:
                     pass
+
+    # Connectivity restoration and dense induced edges can make the final graph
+    # exceed the budget even when the threshold estimate fitted.  Enforce the
+    # budget on the graph that is actually returned, not just on a node-count
+    # approximation made before restoration.  Evidence nodes are removed last;
+    # at least the five strongest evidence nodes survive whenever possible.
+    if token_budget is not None and token_budget > 0:
+        hard_limit = int(token_budget * 1.2)
+        if estimate_token_usage(SG) > hard_limit:
+            protected = set(capped_force_keep) & set(SG.nodes())
+            removable = sorted(
+                (nid for nid in SG.nodes() if nid not in protected),
+                key=lambda nid: (node_scores.get(nid, 0.0), str(nid)),
+            )
+            removed_for_budget = 0
+            for nid in removable:
+                if estimate_token_usage(SG) <= hard_limit:
+                    break
+                SG.remove_node(nid)
+                removed_for_budget += 1
+
+            if estimate_token_usage(SG) > hard_limit and len(protected) > 5:
+                weak_evidence = sorted(
+                    protected,
+                    key=lambda nid: (node_scores.get(nid, 0.0), str(nid)),
+                )
+                for nid in weak_evidence[:-5]:
+                    if estimate_token_usage(SG) <= hard_limit:
+                        break
+                    SG.remove_node(nid)
+                    removed_for_budget += 1
+
+            if verbose and removed_for_budget:
+                print(
+                    f"  [Budget] 最终图裁剪 {removed_for_budget} 个节点，"
+                    f"实际估算 {estimate_token_usage(SG)}/{hard_limit} tokens"
+                )
 
     # 计算缩减率统计
     sg_nodes = SG.number_of_nodes()
@@ -623,7 +675,7 @@ def summarize_graph(
         print(
             f"[Summarize] {orig_nodes}节点/{orig_edges}边"
             f" -> {sg_nodes}节点/{sg_edges}边"
-            f" (强制保留 {len(force_keep)} 个危险节点)"
+            f" (强制保留 {len(set(capped_force_keep) & set(SG.nodes()))} 个危险节点)"
         )
         print(
             f"  [Reduction] 节点缩减: {node_reduction:.1f}%, "
@@ -641,7 +693,9 @@ def summarize_graph(
         "edge_reduction_pct": round(edge_reduction, 2),
         "est_token_reduction_pct": round(est_token_reduction, 2),
         "node_threshold_used": round(node_threshold, 2),
-        "force_retained": len(force_keep),
+        "force_retained": len(set(capped_force_keep) & set(SG.nodes())),
+        "estimated_tokens": estimate_token_usage(SG),
+        "token_budget": token_budget,
     }
 
     return SG
@@ -736,7 +790,8 @@ def summarize_graph_slice_aware(
                               f"额外 {len(extra_keep)} = {len(keep_nodes)}, "
                               f"est={len(keep_nodes)*NODE_TOKEN_ESTIMATE} tokens")
     else:
-        return summarize_graph(G, token_budget=token_budget, verbose=verbose)
+        return summarize_graph(G, token_budget=token_budget,
+                               source_code=source_code or "", verbose=verbose)
 
     SG = nx.MultiDiGraph()
     for nid in keep_nodes:

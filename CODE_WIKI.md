@@ -1,5 +1,11 @@
 # HGL-Vul Code Wiki
 
+> 2026-10-08 更新：旧版本机制叙述仅供历史参考。主指标现统一为全计划分母
+> Accuracy/保守 F1（错误和拒判计错），成功样本指标另列 *_valid。源码安全网
+> 仅允许受限相邻直线释放/使用证据翻转；旧 lexical score 仅诊断。后处理分别记录
+> main/final 状态。学习、图安全网、仲裁与已失败候选保持关闭；唯一待确认候选
+> 为 SOURCE_SLICE_ASSIGNMENT_FIX，详见 evaluation/SEMANTIC_REPAIR_PROTOCOL_20261008.md。
+
 > **HGL-Vul** (Hierarchical Graph Linearization for Vulnerability Reasoning)
 > 面向长距离漏洞推理的分层图线性化框架 v2.0
 

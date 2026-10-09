@@ -322,7 +322,7 @@ class SyntheticDatasetGenerator:
 
     def __init__(self, config: dict = None):
         self.config = config or SYNTHETIC_CONFIG
-        self.random = random.Random(42)
+        self.random = random.Random(self.config.get("seed", 42))
 
     def generate(self, output_dir: str = None) -> list:
         """
@@ -368,8 +368,10 @@ class SyntheticDatasetGenerator:
                 code = code.replace("__LBRACE__", "{").replace("__RBRACE__", "}")
 
                 sample_id += 1
+                fname = f"{vul_type}_{hop_level}_{sample_id}.c"
                 sample = {
                     "id": sample_id,
+                    "filename": fname,
                     "code": code,
                     "label": 1,  # 有漏洞
                     "vul_type": vul_type,
@@ -381,7 +383,6 @@ class SyntheticDatasetGenerator:
                 samples.append(sample)
 
                 # 写入文件
-                fname = f"{vul_type}_{hop_level}_{sample_id}.c"
                 filepath = os.path.join(output_dir, fname)
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(code)
@@ -393,8 +394,10 @@ class SyntheticDatasetGenerator:
             # 将 {{ 转换为 {，}} 转换为 }
             code = template.replace("{{", "{").replace("}}", "}")
             sample_id += 1
+            fname = f"benign_{sample_id}.c"
             sample = {
                 "id": sample_id,
+                "filename": fname,
                 "code": code,
                 "label": 0,  # 无漏洞
                 "vul_type": "benign",
@@ -405,7 +408,6 @@ class SyntheticDatasetGenerator:
             }
             samples.append(sample)
 
-            fname = f"benign_{sample_id}.c"
             filepath = os.path.join(output_dir, fname)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(code)
@@ -417,6 +419,11 @@ class SyntheticDatasetGenerator:
             "benign": len([s for s in samples if s["label"] == 0]),
             "by_type": {},
             "by_hop": {},
+            # 不重复保存源码，只保存可复现评测所需的逐样本真值。
+            "samples": [
+                {k: v for k, v in s.items() if k != "code"}
+                for s in samples
+            ],
         }
         for s in samples:
             vt = s.get("vul_type", "benign")

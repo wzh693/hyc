@@ -61,7 +61,8 @@ def sample_selection(G: nx.MultiDiGraph, code: str, target: int,
     失败返回 (None, None, None)。
     """
     try:
-        SG = summarize_graph(G, token_budget=TRAIN_BUDGET, verbose=False)
+        SG = summarize_graph(G, token_budget=TRAIN_BUDGET,
+                             source_code=code, verbose=False)
         # BUG-09 修复（同 compare_devign）：SG 空路径回退 G 时，rank/锚点
         # 提取须用路径同源图，否则 rank_paths 特征丢失、锚点被 SG 过滤
         sg_paths = extract_all_candidate_paths(

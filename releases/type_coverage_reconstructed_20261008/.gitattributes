@@ -1,0 +1,7 @@
+# Preserve frozen source bytes so SHA-256 checks also work after Linux checkout.
+src/** -text
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+run_tests.py text eol=lf
+fixtures/*.c text eol=lf

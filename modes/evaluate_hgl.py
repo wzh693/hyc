@@ -15,10 +15,8 @@ from retrieval.candidate_paths import extract_all_candidate_paths
 from retrieval.retrieve_topk import retrieve_topk
 from linearization.function_summary import summarize_function
 from linearization.block_summary import summarize_block
-from linearization.typed_paths import typed_dependency_path, build_hierarchical_context, extract_api_hints
 from reasoning.llm_api import create_client
-from reasoning.reasoning_loop import run_vuln_detection, reasoning_loop
-from planning.state_memory import ProgramState
+from reasoning.reasoning_loop import reasoning_loop
 from evaluation.metrics import (
     compute_detailed_report, compute_long_range_metrics,
     compute_code_reduction_metrics,
@@ -60,7 +58,16 @@ def mode_evaluate_hgl(data_dir: str = None, max_samples: int = 50,
             print(f"  Dataset metadata: {metadata}")
 
         metadata_samples = metadata.get("samples", [])
-        meta_map = {s.get("id", s.get("filename", "")): s for s in metadata_samples} if isinstance(metadata_samples, list) else {}
+        meta_map = {}
+        if isinstance(metadata_samples, list):
+            for item in metadata_samples:
+                if item.get("filename"):
+                    meta_map[item["filename"]] = item
+                if item.get("id") is not None:
+                    meta_map[str(item["id"])] = item
+            listed_files = {s.get("filename") for s in metadata_samples if s.get("filename")}
+            if listed_files:
+                c_files = [f for f in c_files if f in listed_files]
 
         for idx, fname in enumerate(c_files):
             fpath = os.path.join(data_dir, fname)
@@ -114,83 +121,15 @@ def mode_evaluate_hgl(data_dir: str = None, max_samples: int = 50,
         }
 
         try:
-            # Phase 1: CPG 构建
-            export_dir = build_cpg(code_path, sample_dir)
-            nodes_file, edges_file = find_export_files(export_dir)
-        except Exception as e:
-            print(f"  [Error] CPG构建失败: {e}")
-            result["prediction"] = 0
-            result["error"] = str(e)
-            results.append(result)
-            continue
-
-        if not os.path.exists(nodes_file):
-            print(f"  [Error] nodes.json 不存在")
-            result["prediction"] = 0
-            result["error"] = "nodes.json not found"
-            results.append(result)
-            continue
-
-        # Phase 2: 图加载
-        try:
-            G = load_graph(nodes_file, edges_file)
-        except Exception as e:
-            print(f"  [Error] 图加载失败: {e}")
-            result["prediction"] = 0
-            result["error"] = str(e)
-            results.append(result)
-            continue
-
-        # Phase 3: 图压缩（v2.0 动态预算感知）
-        SG = summarize_graph(G, token_budget=token_budget)
-        reduction_stats = SG.graph.get("reduction_stats", {})
-        result["orig_nodes"] = reduction_stats.get("orig_nodes", G.number_of_nodes())
-        result["compressed_nodes"] = reduction_stats.get("compressed_nodes", SG.number_of_nodes())
-        result["node_reduction_pct"] = reduction_stats.get("node_reduction_pct", 0)
-
-        # Phase 4: 路径检索
-        candidate_paths = extract_all_candidate_paths(SG, source_code=code)
-        if not candidate_paths:
-            candidate_paths = extract_all_candidate_paths(G, source_code=code)
-        topk_paths = retrieve_topk(SG if candidate_paths else G, candidate_paths)
-
-        # Phase 5: 层次化线性化
-        func_summary = summarize_function(code)
-        api_hints = extract_api_hints(code)
-        blocks = code.split("\n\n")
-        block_summaries = {}
-        for j, block in enumerate(blocks):
-            if block.strip():
-                block_summaries[j] = summarize_block(block) or block.strip()[:80]
-
-        paths_context = []
-        for path in topk_paths[:5]:
-            path_str = typed_dependency_path(SG, path, api_hints=api_hints)
-            if path_str:
-                paths_context.append(path_str)
-
-        state = ProgramState()
-        state.track_vars(code)
-        state_str = state.serialize()
-
-        hierarchical_context = build_hierarchical_context(
-            func_summary, block_summaries, paths_context, state_str
-        )
-
-        # Phase 6: 受限推理
-        try:
-            reasoning_result = reasoning_loop(
-                SG, topk_paths, code, func_summary, block_summaries,
-                client=llm_client,
-            )
-            llm_prediction = 1 if reasoning_result.get("vulnerability_type", "Unknown") != "Unknown" else 0
-            result["prediction"] = llm_prediction
-            result["vulnerability_type"] = reasoning_result.get("vulnerability_type", "Unknown")
-            result["reasoning_steps"] = reasoning_result.get("steps", 0)
+            from graph.pipeline import run_hgl_pipeline
+            details = run_hgl_pipeline(code_path, code, sample_id, sample_dir, llm_client,
+                                       token_budget, return_details=True)
+            result.update(details)
+            result["node_reduction_pct"] = details["reduction_stats"].get("node_reduction_pct", 0)
             result["error"] = None
         except Exception as e:
-            print(f"  [Error] 推理失败: {e}")
-            result["prediction"] = 0
+            print(f"  [Error] 管线失败: {e}")
+            result["prediction"] = None
             result["error"] = str(e)
 
         # 记录结果

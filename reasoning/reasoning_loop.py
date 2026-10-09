@@ -17,9 +17,9 @@ import networkx as nx
 from config import MAX_REASONING_STEPS, DANGEROUS_APIS, BACKSTOP_SINK_APIS
 from graph.graph_engine import GraphEngine
 from linearization.typed_paths import build_hierarchical_context
-from planning.state_memory import ProgramState
+from planning.state_memory import ProgramState, create_program_state
 from planning.planner import RetrievalPlanner
-from reasoning.llm_api import query_llm
+from reasoning.llm_api import query_llm_with_retry
 from reasoning.prompts import build_user_prompt
 from reasoning.explanation import generate_explanation
 
@@ -44,6 +44,40 @@ _BENIGN_WORD_RES = (
 )
 
 
+def parse_binary_verdict(answer: str):
+    """Parse an explicit binary LLM verdict. Return 0/1, or None if ambiguous."""
+    raw = (answer or "").strip().lower()
+    explicit = re.search(r'\bvulnerability\s*:\s*(yes|no)\b', raw)
+    if explicit:
+        return 1 if explicit.group(1) == "yes" else 0
+    if raw in {"yes", "vulnerable"}:
+        return 1
+    if raw in {"no", "benign", "safe"}:
+        return 0
+    benign = any(p in raw for p in (
+        "not vulnerable", "no vulnerability", "benign", "does not contain",
+        "no security issue", "no issue", "no bug",
+    )) or _SAFE_RE.search(raw)
+    vulnerable = bool(re.search(r'\bvulnerable\b', raw)) or any(
+        p in raw for p in (
+            "use-after-free", "use after free", "double free", "buffer overflow",
+            "out-of-bounds", "out of bounds", "oob read", "oob write",
+            "buffer over-read", "buffer overread", "integer overflow",
+            "arithmetic overflow", "signed overflow", "null pointer dereference",
+            "null deref", "memory leak",
+        )
+    ) or bool(re.search(r'\buaf\b', raw))
+    # Explicit negatives can mention the vulnerability being ruled out; a
+    # contradictory positive and a local 'safe' statement are not a verdict.
+    if benign and vulnerable and not re.search(r'\b(?:not vulnerable|no vulnerability)\b', raw):
+        return None
+    if benign:
+        return 0
+    if vulnerable:
+        return 1
+    return None
+
+
 def _has_benign_word(text: str) -> bool:
     return any(rx.search(text) for rx in _BENIGN_WORD_RES)
 
@@ -63,6 +97,18 @@ def _graph_danger_signal(G: nx.MultiDiGraph, paths: list) -> bool:
     return False
 
 
+def _needs_evidence_expansion(output: str, action: str) -> bool:
+    """Permit a bounded second pass only for a requested evidence gap."""
+    if action not in {'ExpandDFG', 'ExpandCFG', 'ExpandCALL', 'RetrieveAlias', 'CheckReachability'}:
+        return False
+    return bool(re.search(
+        r'error[- ]path|insufficient|incomplete|truncated|omitted|unclear|unknown|'
+        r'not (?:shown|visible|established)|missing|need(?:s)? (?:more|to|additional)|cannot confirm|'
+        r'no [^\n.;]{0,40}(?:shown|visible)|need(?:s)? (?:the )?(?:exit|free|allocation|alias|data|control|bounds|guard|ownership)\b',
+        # Specific exit/free/guard evidence requests are also bounded gaps.
+        output, re.I))
+
+
 def reasoning_loop(
     G: nx.MultiDiGraph,
     initial_paths: list,
@@ -73,6 +119,8 @@ def reasoning_loop(
     use_prog_state: bool = True,
     use_adapt_plan: bool = True,
     use_hier_lin: bool = True,
+    *, full_graph=None, max_steps=None, use_slice=None,
+    use_output_contract=None, use_expansion=None, source_line_offset=0,
 ) -> dict:
     """
     受限漏洞推理主循环。
@@ -97,8 +145,33 @@ def reasoning_loop(
             "steps": int,
         }
     """
+    expansion_disabled = use_expansion is False
+    from config import USE_BACKWARD_SLICE, BOUNDED_OUTPUT_CONTRACT, EVIDENCE_EXPANSION, BUDGETED_EVIDENCE_GROUPS
+    use_slice = USE_BACKWARD_SLICE if use_slice is None else use_slice
+    use_output_contract = BOUNDED_OUTPUT_CONTRACT if use_output_contract is None else use_output_contract
+    use_expansion = EVIDENCE_EXPANSION if use_expansion is None else use_expansion
+    limit = MAX_REASONING_STEPS if max_steps is None else max_steps
+    if not isinstance(limit, int) or not 1 <= limit <= 3:
+        raise ValueError('max_steps must be between 1 and 3')
+    context_graph = G
+    evidence_graph = full_graph if full_graph is not None else G
+    if use_expansion:
+        G = evidence_graph
     engine = GraphEngine(G)
-    state = ProgramState()
+    audit = {'backward_slice': {'enabled': False}, 'output_contract': bool(use_output_contract),
+             'expansion': {'enabled': bool(use_expansion), 'events': []},
+             'stop_reason': 'step_limit', 'output_incomplete': False}
+    source_evidence = None
+    if use_slice and use_hier_lin:
+        from linearization.backward_slice import backward_evidence_slice
+        sliced, audit['backward_slice'] = backward_evidence_slice(
+            evidence_graph, initial_paths, function_code, line_offset=source_line_offset,
+            max_chars=min(1100, max(600, len(function_code) // 8)),
+            atomic_groups=BUDGETED_EVIDENCE_GROUPS)
+        source_evidence = sliced or None
+    state = create_program_state()
+    if use_prog_state:
+        state.track_vars(function_code)
     planner = RetrievalPlanner()
     current_paths = list(initial_paths)
     all_evidence_paths = list(initial_paths)
@@ -106,6 +179,7 @@ def reasoning_loop(
     latest_output = ""  # 最近一轮 LLM 输出（供增量 prompt 引用）
     vulnerability_type = "Unknown"
     total_tokens = 0
+    trace = []
     step = 0
     no_vuln_streak = 0
     confirm_streak = 0
@@ -114,7 +188,9 @@ def reasoning_loop(
     # 消融：层次化线性化 vs 扁平路径
     if use_hier_lin:
         initial_hierarchical_context = build_hierarchical_context(
-            G, function_code, function_summary, block_summaries, current_paths
+            context_graph, function_code, function_summary, block_summaries, current_paths,
+            include_state=use_prog_state,
+            **({'source_evidence': source_evidence} if source_evidence is not None else {}),
         )
     else:
         # no_hier_lin：用扁平路径替代层次化上下文（仍走受限推理循环，
@@ -127,16 +203,17 @@ def reasoning_loop(
                 flat_parts.append(f"P{i+1}: {ps}")
         flat_parts.append(f"\nFUNC SUMMARY: {function_summary}")
         initial_hierarchical_context = "\n".join(flat_parts)
-    for step in range(1, MAX_REASONING_STEPS + 1):
+    for step in range(1, limit + 1):
         print(f"\n{'='*50}")
-        print(f"  Reasoning Step {step}/{MAX_REASONING_STEPS}")
+        print(f"  Reasoning Step {step}/{limit}")
         print(f"{'='*50}")
 
         if step == 1:
             hierarchical_context = initial_hierarchical_context
         else:
             hierarchical_context = _build_incremental_context(
-                G, current_paths, all_evidence_paths, step
+                G, current_paths, all_evidence_paths, step,
+                **({'path_limit': 5} if use_expansion else {}),
             )
         # 消融 no_prog_state：不注入程序状态记忆到 prompt
         state_dump = state.dump() if use_prog_state else "(state memory disabled)"
@@ -151,12 +228,50 @@ def reasoning_loop(
         )
 
         print("[LLM] 推理中...")
-        result, step_tokens = query_llm(prompt, client)
+        from reasoning.llm_api import reset_call_metadata, get_call_metadata
+        from reasoning.prompts import get_system_prompt
+        from config import RECORD_REASONING_TRACE
+        reset_call_metadata()
+        result, step_tokens = (query_llm_with_retry(prompt, client, bounded_output=True)
+                              if use_output_contract else query_llm_with_retry(prompt, client))
+        receipt = {"step": step, "tokens_used": step_tokens, **get_call_metadata()}
+        if RECORD_REASONING_TRACE:
+            receipt.update({"system_prompt": get_system_prompt(prompt, bounded_output=use_output_contract),
+                            "user_prompt": prompt, "answer": result})
+        trace.append(receipt)
+        fields_ok = bool(re.search(r'^\s*HYPOTHESIS:\s*\S', result, re.M | re.I)) and bool(
+            re.search(r'ACTION:\s*\{[^}]*"action"\s*:\s*"[^"]+"[^}]*\}', result, re.I))
+        if use_output_contract:
+            import json
+            action_match = re.search(r'ACTION:\s*(\{[^}]*\})', result, re.I)
+            try:
+                action_data = json.loads(action_match.group(1)) if action_match else {}
+            except (ValueError, TypeError):
+                action_data = {}
+            fields_ok = fields_ok and bool(re.search(r'^\s*REASONING:\s*\S', result, re.M | re.I)) and (
+                action_data.get('action') in {'Stop', 'ExpandDFG', 'ExpandCFG', 'ExpandCALL',
+                                             'RetrieveAlias', 'CheckReachability'})
+        receipt['output_fields_complete'] = fields_ok
+        receipt['output_truncated'] = receipt.get('finish_reason') == 'length'
+        incomplete = use_output_contract and not fields_ok
+        audit['output_incomplete'] = audit['output_incomplete'] or incomplete
         total_tokens += step_tokens
         latest_output = result
         print(f"[LLM] 输出:\n{result[:500]}...")
 
-        vul_type = _extract_vulnerability_type(result, is_final=(step == MAX_REASONING_STEPS))
+        vul_type = 'Unknown' if incomplete else _extract_vulnerability_type(result, is_final=(step == limit))
+        proposed_action = planner.decide_action(result) if use_adapt_plan else _fixed_plan_action(step)
+        requested_gap = use_expansion and not incomplete and _needs_evidence_expansion(result, proposed_action)
+        if requested_gap and use_adapt_plan:
+            # Candidate routing requires an explicit, complete model request;
+            # planner keyword fallback on a truncated answer is not authorization.
+            import json
+            explicit = re.search(r'ACTION:\s*(\{[^}]*\})', result, re.I)
+            try:
+                requested_action = json.loads(explicit.group(1)).get('action') if explicit else None
+            except (ValueError, TypeError, AttributeError):
+                requested_action = None
+            requested_gap = requested_action == proposed_action
         if vul_type != "Unknown":
             vulnerability_type = vul_type
             no_vuln_streak = 0
@@ -171,6 +286,10 @@ def reasoning_loop(
             confirm_streak = 0
 
         _update_program_state(state, result, G, current_paths, step)
+        if incomplete:
+            conclusion = result
+            audit['stop_reason'] = 'incomplete_output'
+            break
 
         # 图确认早停（v7）：Step1 已给出具体漏洞类型，且 Top-K 路径存在
         # 写型危险 sink 调用——LLM 假设与图结构证据双确认，跳过 Step2 验证。
@@ -182,11 +301,12 @@ def reasoning_loop(
         # 样本确认后精度 45.4%，零过滤），纯冗余 token。消融可关。
         if step == 1 and vulnerability_type not in ("Unknown", "Generic Vulnerability"):
             from config import STEP1_CONFIRM_STOP
-            if STEP1_CONFIRM_STOP or _graph_danger_signal(G, initial_paths):
+            if not requested_gap and (STEP1_CONFIRM_STOP or _graph_danger_signal(G, initial_paths)):
                 tag = "GraphConfirmStop" if _graph_danger_signal(G, initial_paths) \
                     else "Step1ConfirmStop"
                 print(f"[{tag}] Step1 具体类型 '{vulnerability_type}'，提前终止")
                 conclusion = result
+                audit['stop_reason'] = 'confirmed_first_step'
                 break
 
         # 良性+写型危险信号跳步（v8）：Step1 判良性且写型 sink 信号命中时直接终止。
@@ -194,7 +314,9 @@ def reasoning_loop(
         # 结果同为 1；若 Step2 仍良性，兜底仍判 1。跳过 Step2 仅省 token。
         # v10: 弱信号（free/alloc/转换/污点源）不再跳步——此类信号兜底
         # FP:TP=5:1（离线验证），改跑 Step2 交 LLM 判定，不做兜底。
-        if step == 1 and vul_type == "Unknown" and _graph_danger_signal(G, initial_paths):
+        from config import USE_ZERO_TOKEN_SECURITY_NET, F1_EVIDENCE_ROUTING
+        if step == 1 and vul_type == "Unknown" and not USE_ZERO_TOKEN_SECURITY_NET \
+                and _graph_danger_signal(G, initial_paths):
             print("[BenignSignalSkip] Step1 良性但图危险信号命中，跳步交兜底判定")
             conclusion = result
             break
@@ -202,12 +324,40 @@ def reasoning_loop(
         # 消融 no_adapt_plan：固定调度顺序 CFG→DFG→CALL，
         # 不依据 LLM 输出决策动作
         if use_adapt_plan:
-            action = planner.decide_action(result)
+            action = proposed_action
         else:
             action = _fixed_plan_action(step)
         print(f"[Planner] 下一步动作: {action}")
+        if expansion_disabled:
+            conclusion = result
+            audit['stop_reason'] = 'expansion_ablation'
+            break
+
+        # 低-token选择性二轮：绝大多数首轮良性结论直接结束；只有模型明确
+        # 指出 error path 证据缺失，且下方 planner 也要求扩展时才继续。
+        # 校准集上该不确定组漏洞率 4/5。它只是路由条件，不直接修改标签。
+        if step == 1 and vul_type == "Unknown":
+            from config import SELECTIVE_SECOND_PASS
+            allow_second = (requested_gap if use_expansion else
+                (_needs_evidence_expansion(result, action) if F1_EVIDENCE_ROUTING
+                 else "error path" in result.lower()))
+            if SELECTIVE_SECOND_PASS and not allow_second:
+                print("[SelectiveStop] 无高收益 error-path 缺口，首轮终止")
+                conclusion = result
+                audit['stop_reason'] = 'no_requested_gap'
+                break
+
+        if incomplete:
+            conclusion = result
+            audit['stop_reason'] = 'incomplete_output'
+            break
+        if use_expansion and not requested_gap:
+            conclusion = result
+            audit['stop_reason'] = 'no_requested_gap'
+            break
 
         if action == "Stop" or action == "SummarizeEvidence":
+            audit['stop_reason'] = 'planner_stop'
             conclusion = result
             # 如果 LLM 主动停止但未给出明确漏洞类型，记录当前类型
             if vulnerability_type == "Unknown":
@@ -227,10 +377,26 @@ def reasoning_loop(
             conclusion = result
             break
 
+        if step >= limit:
+            break
         new_paths = _execute_action(engine, action, current_paths, G)
+        if use_expansion:
+            seen_paths = {tuple(p) for p in all_evidence_paths}
+            new_paths = [p for p in _deduplicate_paths(new_paths) if tuple(p) not in seen_paths]
+            if new_paths:
+                from retrieval.retrieve_topk import retrieve_topk
+                new_paths = retrieve_topk(G, new_paths)
+            audit['expansion']['events'].append({'step': step, 'action': action,
+                                                'new_paths': len(new_paths)})
+            if not new_paths:
+                conclusion = result
+                audit['stop_reason'] = 'no_new_evidence'
+                break
         if new_paths:
             current_paths = new_paths
             all_evidence_paths.extend(new_paths)
+            if use_expansion and use_prog_state:
+                _update_program_state(state, '', G, new_paths, step)
 
     # 循环耗尽（末步选了扩展动作、无任何 break）时 conclusion 保持空串——
     # 10617 翻转成 TP 后 raw_answer 仍为空的原因。回填最近一轮输出。
@@ -258,13 +424,23 @@ def reasoning_loop(
             final_benign = True
             vulnerability_type = "Unknown"
 
+    if use_output_contract and trace and not trace[-1].get('output_fields_complete', False):
+        vulnerability_type = 'Unknown'
+    decision_status = ('Uncertain' if use_output_contract and (
+        audit['output_incomplete'] or re.search(r'HYPOTHESIS:\s*Uncertain\b', conclusion, re.I))
+        else ('Vulnerable' if vulnerability_type != 'Unknown' else 'Benign'))
+    if decision_status == 'Uncertain':
+        vulnerability_type = 'Unknown'
+
     # 图危险信号兜底（v5）：LLM 判良性/不确定，但 Top-K 证据路径上
     # 存在写型危险 sink 调用节点时，security-first 倾向报漏洞。
     # v10: 信号收窄为写型 sink——弱信号（free/alloc/转换/污点源）样本
     # 不再兜底，直接采用 LLM 判定（离线验证：弱信号兜底 FP:TP=5:1）。
     # v16.1: 最终步明确良性时跳过兜底（否则检索的危险路径必然把
     # 良性改判翻转回漏洞，最终结论形同虚设）。
-    if vulnerability_type == "Unknown" and not final_benign \
+    from config import USE_ZERO_TOKEN_SECURITY_NET
+    if not USE_ZERO_TOKEN_SECURITY_NET and vulnerability_type == "Unknown" and not final_benign \
+            and decision_status != 'Uncertain' \
             and _graph_danger_signal(G, initial_paths):
         print("[DangerSignal] LLM 判良性但 Top-K 路径含危险 sink 调用，兜底报漏洞")
         vulnerability_type = "Generic Vulnerability"
@@ -282,6 +458,9 @@ def reasoning_loop(
         "explanation": explanation,
         "steps": step,
         "tokens_used": total_tokens,
+        "trace": trace,
+        "module_audit": audit,
+        "decision_status": decision_status,
     }
 
 
@@ -305,6 +484,7 @@ def _build_incremental_context(
     current_paths: list,
     all_evidence_paths: list,
     step: int,
+    *, path_limit=1,
 ) -> str:
     """构建增量上下文：仅包含新增路径摘要，避免重复发送完整层次化上下文。
 
@@ -322,16 +502,17 @@ def _build_incremental_context(
     from linearization.typed_paths import _labeled_compact_path, path_evidence_tags
     parts = [f"[Incremental Update - Step {step}]"]
     parts.append(f"New paths to analyze: {len(current_paths)}")
-    for i, path in enumerate(current_paths[:1]):
+    for i, path in enumerate(current_paths[:path_limit]):
         path_str = _labeled_compact_path(G, path)
         if path_str:
             # v16：路径级证据头仅危险侧（BUG-19；v15 曾含 SAFE 守卫计数，
             # 安全锚点双刃剑，回退 B 方案）
             tags = path_evidence_tags(G, path)
             head = f" [{tags}]" if tags else ""
-            parts.append(f"\nPath {i+1}{head}: {path_str}")
-    if len(current_paths) > 1:
-        parts.append(f"\n... and {len(current_paths) - 1} more paths (omitted for token efficiency)")
+            rendered = path_str if path_limit == 1 else path_str[:100]
+            parts.append(f"\nPath {i+1}{head}: {rendered}")
+    if len(current_paths) > path_limit:
+        parts.append(f"\n... and {len(current_paths) - path_limit} more paths (omitted for token efficiency)")
     return "\n".join(parts)
 
 
@@ -404,8 +585,17 @@ def _extract_vulnerability_type(llm_output: str, is_final: bool = False) -> str:
         return "Use-After-Free"
     if "double free" in hypothesis:
         return "Double Free"
-    if "buffer overflow" in hypothesis:
+    if ("out-of-bounds read" in hypothesis or "out of bounds read" in hypothesis
+            or "oob read" in hypothesis or "buffer over-read" in hypothesis
+            or "buffer overread" in hypothesis):
+        return "Out-of-Bounds Read"
+    if ("buffer overflow" in hypothesis or "out-of-bounds write" in hypothesis
+            or "out of bounds write" in hypothesis or "oob write" in hypothesis):
         return "Buffer Overflow"
+    if ("integer overflow" in hypothesis or "arithmetic overflow" in hypothesis
+            or "signed overflow" in hypothesis or "integer wraparound" in hypothesis
+            or "integer wrap-around" in hypothesis):
+        return "Integer Overflow"
     if "taint" in hypothesis:
         return "Taint-style Vulnerability"
     if ("null pointer" in hypothesis or "null deref" in hypothesis
@@ -447,7 +637,7 @@ def _execute_action(
         if path:
             end_nodes.add(path[-1])
 
-    for node in list(end_nodes)[:15]:
+    for node in sorted(end_nodes, key=str)[:15]:
         if action == "ExpandDFG":
             paths = engine.expand_dataflow(node, max_hop=6)
         elif action == "ExpandCFG":
@@ -489,6 +679,19 @@ def _update_program_state(
       - recv/read/scanf/gets -> tainted
       - -> 或 * 操作 -> dereferenced
     """
+    if getattr(state, 'observation_only', False):
+        for nid in dict.fromkeys(nid for path in paths for nid in path):
+            state.observe_graph_node(nid, G.nodes.get(nid, {}), step)
+        return
+
+    def record(var, event, nid):
+        # 源码扫描已记录的事件比路径子集更完整；不要用同一语义的图事件
+        # 再记一次，否则一次 free 会被误判为 double-free。
+        if any(h["state"] == event and h.get("step") == 0
+               for h in state.get_state(var)):
+            return
+        state.update(var, event, nid, step)
+
     for path in paths:
         for nid in path:
             code = G.nodes.get(nid, {}).get("code", "").lower()
@@ -496,12 +699,12 @@ def _update_program_state(
             if "malloc" in code or "calloc" in code or "realloc" in code:
                 var = _extract_var(code)
                 if var:
-                    state.update(var, "allocated", nid, step)
+                    record(var, "allocated", nid)
 
             if re.search(r'\b(?:free|av_free|av_freep|kfree|munmap)\b', code):
                 var = _extract_var(code)
                 if var:
-                    state.update(var, "freed", nid, step)
+                    record(var, "freed", nid)
 
             # BUG-17 修复：子串匹配 "read" 命中 thread/already/webvtt_read_header、
             # "gets" 命中 budgets/targets/widgets → 虚假 tainted 事件。
@@ -509,12 +712,12 @@ def _update_program_state(
             if re.search(r'\b(?:recv|read|scanf|gets)\s*\(', code):
                 var = _extract_var(code)
                 if var:
-                    state.update(var, "tainted", nid, step)
+                    record(var, "tainted", nid)
 
             if "->" in code or ("*" in code and "*/" not in code):
                 var = _extract_var(code)
                 if var:
-                    state.update(var, "dereferenced", nid, step)
+                    record(var, "dereferenced", nid)
 
 
 def _extract_var(code: str) -> str:
@@ -599,7 +802,7 @@ Answer ONLY: VULNERABLE or BENIGN"""
             answer = response.choices[0].message.content.strip()
             raw = answer.lower()
         else:
-            answer, _ = query_llm(prompt, client)
+            answer, _ = query_llm_with_retry(prompt, client)
             answer = answer.strip()
             raw = answer.lower()
 
@@ -607,20 +810,17 @@ Answer ONLY: VULNERABLE or BENIGN"""
         # （_extract_vulnerability_type 的 _SAFE_RE 同类 bug 在此入口复发）。
         # 词边界 + (?<!not ) 排除："unsafe" 不命中，"not safe" 交由
         # "not vulnerable"/"no vulnerability" 语义组以外的否定词处理。
-        neg = any(n in raw for n in [
-            "not vulnerable", "no vulnerability", "not a", "does not", "benign",
-        ]) or _SAFE_RE.search(raw)
-        is_vuln = "vulnerable" in raw and not neg
-
-        if is_vuln:
+        verdict = parse_binary_verdict(answer)
+        if verdict == 1:
             snippet = answer[:120].replace('\n', ' ')
             print(f"  [VulnDetect] {sample_id}: VULNERABLE -> '{snippet}'")
             return 1
-        else:
+        if verdict == 0:
             snippet = answer[:120].replace('\n', ' ')
             print(f"  [VulnDetect] {sample_id}: BENIGN -> '{snippet}'")
             return 0
+        raise ValueError(f"Ambiguous LLM verdict: {answer[:120]!r}")
 
     except Exception as e:
-        print(f"  [VulnDetect] {sample_id}: 调用失败 ({e}), 默认 benign")
-        return 0
+        print(f"  [VulnDetect] {sample_id}: 调用失败 ({e})")
+        return None

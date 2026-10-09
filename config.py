@@ -1,12 +1,26 @@
 import os
+import shutil
+
+# Load before every environment-derived setting; process environment wins.
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'), encoding='utf-8') as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _k, _v = _line.split('=', 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+except FileNotFoundError:
+    pass
 
 # ============================================================
 # Joern 配置
 # ============================================================
 # Joern 安装目录（build_cpg.py 中会引用此路径）
+_JOERN_ON_PATH = shutil.which("joern-parse.bat" if os.name == "nt" else "joern-parse")
 JOERN_DIR = os.environ.get(
     "JOERN_DIR",
-    r"D:\浏览器下载\joern-cli4.1.6"
+    os.path.dirname(_JOERN_ON_PATH) if _JOERN_ON_PATH
+    else os.path.join(os.path.dirname(os.path.abspath(__file__)), "joern-cli"),
 )
 JOERN_PARSE_CMD = os.path.join(JOERN_DIR, "joern-parse.bat") if os.name == "nt" else os.path.join(JOERN_DIR, "joern-parse")
 JOERN_EXPORT_CMD = os.path.join(JOERN_DIR, "bin", "joern-export.bat") if os.name == "nt" else os.path.join(JOERN_DIR, "bin", "joern-export")
@@ -94,7 +108,31 @@ TOP_K_PATHS = 15
 # 且收敛即停/良性早停使多数样本 1~2 步即终止
 # v6: 3→2。离线验证（v5 日志 39 个 3 步样本）：截断到 2 步标签 35/39 不变，
 # 正确数 23=23 持平，指标中性；每省一步 ~700 tok。
-MAX_REASONING_STEPS = 2
+MAX_REASONING_STEPS = max(1, int(os.environ.get("MAX_REASONING_STEPS", "2")))
+
+# 低 token 实验开关。默认保持历史行为；正式评测通过环境变量开启，且
+# _pipeline_fingerprint 会把开关纳入指纹，避免复用其他配置的预测。
+COMPACT_THREE_PART_CONTEXT = os.environ.get(
+    "COMPACT_THREE_PART_CONTEXT", "1"
+) == "1"
+USE_LLM_ARBITRATION = os.environ.get("USE_LLM_ARBITRATION", "0") == "1"
+# 仅当首轮良性结论明确指出 error-path 证据缺失、且规划器请求继续时，
+# 才允许第二轮。Devign 校准集该组 4/5 为漏洞；普通良性样本单轮结束。
+SELECTIVE_SECOND_PASS = os.environ.get("SELECTIVE_SECOND_PASS", "1") == "1"
+F1_EVIDENCE_ROUTING = os.environ.get("F1_EVIDENCE_ROUTING", "0") == "1"
+STRUCTURED_PRIOR_SUMMARY = os.environ.get("STRUCTURED_PRIOR_SUMMARY", "0") == "1"
+COMPACT_VERDICT_PROMPT = os.environ.get("COMPACT_VERDICT_PROMPT", "0") == "1"
+RECORD_REASONING_TRACE = os.environ.get("RECORD_REASONING_TRACE", "0") == "1"
+FOCUSED_GRAPH_ANCHORS = os.environ.get("FOCUSED_GRAPH_ANCHORS", "0") == "1"
+TYPE_COVERAGE_PROMPT = os.environ.get("TYPE_COVERAGE_PROMPT", "0") == "1"
+TYPE_COVERAGE_ROUTING = os.environ.get("TYPE_COVERAGE_ROUTING", "0") == "1"
+USE_ZERO_TOKEN_SECURITY_NET = os.environ.get(
+    "USE_ZERO_TOKEN_SECURITY_NET", "1"
+) == "1"
+SECURITY_NET_THRESHOLD = int(os.environ.get("SECURITY_NET_THRESHOLD", "4"))
+GRAPH_SECURITY_NET = os.environ.get("GRAPH_SECURITY_NET", "0") == "1"
+STRICT_OPERATION_TAGS = os.environ.get("STRICT_OPERATION_TAGS", "0") == "1"
+SOURCE_SLICE_ASSIGNMENT_FIX = os.environ.get("SOURCE_SLICE_ASSIGNMENT_FIX", "0") == "1"
 
 # v21（Step1 确认即停）：Step1 给出具体漏洞类型即终止，不再要求图危险信号
 # 双确认。v20 全量日志实证：1524 个 ConvergeStop 样本付了 Step2 全价只为在
@@ -107,16 +145,6 @@ STEP1_CONFIRM_STOP = os.environ.get("STEP1_CONFIRM_STOP", "1") == "1"
 # ============================================================
 # 优先级: 环境变量 > .env 文件 > 默认值
 # .env 文件不提交到版本库（已在 .gitignore 中）
-try:
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), encoding="utf-8") as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _k, _v = _line.split("=", 1)
-                os.environ.setdefault(_k.strip(), _v.strip())
-except FileNotFoundError:
-    pass
-
 _DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 _DEFAULT_MODEL = "deepseek-chat"
 
@@ -130,6 +158,8 @@ LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", _DEFAULT_BASE_URL)
 DATASET_DIR = "data/datasets"
 SYNTHETIC_DIR = "data/synthetic"
 CPG_CACHE_DIR = "data/cpg_cache"
+DEVIGN_JSON_PATH = os.environ.get("DEVIGN_JSON_PATH", "")
+DEVIGN_ENHANCE_DIR = os.environ.get("DEVIGN_ENHANCE_DIR", "")
 
 # 数据集下载 URL
 DATASET_URLS = {
@@ -182,6 +212,10 @@ USE_LEARNED_PATH_RANK = os.environ.get("USE_LEARNED_PATH_RANK", "0") == "1"  # v
 NODE_IMPORTANCE_MODEL_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "learning", "model", "node_importance.joblib"
 )
+NODE_IMPORTANCE_BACKEND = os.environ.get("NODE_IMPORTANCE_BACKEND", "joblib").lower()
+GAT_NODE_IMPORTANCE_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "learning", "model", "gat_mil.pt"
+)
 # ① 压缩：非 force_keep 背景 node_score += WEIGHT * (rank-1) ∈ [-WEIGHT, 0]
 # （纯惩罚模式 v2.4：force_keep 豁免，压缩图为基线近似子集，证据保留单调）
 LEARNED_NODE_WEIGHT = 1.0
@@ -194,3 +228,10 @@ LEARNED_PATH_WEIGHT = 2.0
 EXPERIMENT_DIR = "experiments"
 SEED = 42
 N_RUNS = 3  # 多次运行用于稳定性评估
+# Independently ablatable wiring candidates; do not activate rejected models.
+USE_BACKWARD_SLICE = os.getenv('USE_BACKWARD_SLICE', '0') == '1'
+BOUNDED_OUTPUT_CONTRACT = os.getenv('BOUNDED_OUTPUT_CONTRACT', '0') == '1'
+EVIDENCE_EXPANSION = os.getenv('EVIDENCE_EXPANSION', '0') == '1'
+BUDGETED_EVIDENCE_GROUPS = os.getenv('BUDGETED_EVIDENCE_GROUPS', '0') == '1'
+ACTION_BEFORE_REASONING = os.getenv('ACTION_BEFORE_REASONING', '0') == '1'
+OBSERVED_STATE_CANDIDATE = os.getenv('OBSERVED_STATE_CANDIDATE', '0') == '1'

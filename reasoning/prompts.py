@@ -8,11 +8,76 @@ HGL-Vul 的 prompt 设计遵循以下原则：
   4. 显式状态信息：程序状态记忆
 """
 
-SYSTEM_PROMPT = """C vuln auditor. Input: SRC / DEP PATHS (REACHING_DEF=data, CFG=control, CALL; node tags [SINK]/[SOURCE]/[ALLOC]/[FREE] danger) / STATE. Types: UAF, Double Free, Buffer Overflow, Taint, Null Deref, Memory Leak. Only say "no vulnerability" if the code is clearly safe; any risky pattern (unchecked copy, free-then-use, missing bounds check, unchecked alloc) means vulnerable. Be terse.
+SYSTEM_PROMPT = """C vuln auditor. Input: SRC / DEP PATHS (REACHING_DEF=data, CFG=control, CALL; node tags [SINK]/[SOURCE]/[ALLOC]/[FREE] danger) / STATE. Types: UAF, Double Free, Buffer Overflow, Taint, Null Deref, Memory Leak. Distinguish evidence from heuristics: do not call code vulnerable solely because it allocates without a local free or frees inside a branch. Be terse.
 Format:
 OBSERVATION: <one sentence>
 HYPOTHESIS: <type or "no vulnerability detected">
-REASONING: <short evidence>"""
+REASONING: <short evidence>
+ACTION: {"action":"ExpandDFG|ExpandCFG|ExpandCALL|RetrieveAlias|CheckReachability|SummarizeEvidence|Stop","reason":"short reason"}"""
+
+
+COMPACT_SYSTEM_PROMPT = SYSTEM_PROMPT.split("\nFormat:", 1)[0] + """
+Output exactly three short lines, under 100 tokens total, verdict first:
+HYPOTHESIS: <type or "no vulnerability detected">
+REASONING: <at most 20 words: concrete evidence or missing evidence>
+ACTION: {"action":"Stop|ExpandDFG|ExpandCFG|ExpandCALL|RetrieveAlias|CheckReachability|SummarizeEvidence","reason":"at most 5 words"}"""
+
+
+def needs_expanded_types(user_prompt: str) -> bool:
+    """Route by observed operations, never by dataset metadata or labels."""
+    import re
+    match = re.search(r'(?:^|\n)SRC:\n(.*?)(?:\n\n(?:DEP PATHS|SUMMARY|STATE|EXPLORATION STATE):|$)',
+                      user_prompt, re.S)
+    code = match.group(1) if match else user_prompt
+    from graph.security_net import _mask_noncode
+    code = _mask_noncode(code)
+    return bool(re.search(r'(?:\w|\))\s*\[[^\]\n]+\]', code) or re.search(
+        r'(?<![=!<>])=(?!=)[^;\n]*(?:\w|\))\s*(?:\*|\+|<<)\s*(?:\w|\()', code))
+
+
+def get_system_prompt(user_prompt: str = "", *, bounded_output=False) -> str:
+    from config import COMPACT_VERDICT_PROMPT, TYPE_COVERAGE_PROMPT, TYPE_COVERAGE_ROUTING, ACTION_BEFORE_REASONING
+    if ACTION_BEFORE_REASONING and bounded_output:
+        raise ValueError('Field-order candidate must not combine with the rejected bounded contract')
+    prompt = COMPACT_SYSTEM_PROMPT if COMPACT_VERDICT_PROMPT else SYSTEM_PROMPT
+    if bounded_output:
+        prompt = SYSTEM_PROMPT.split('\nFormat:', 1)[0] + '''
+Output exactly these three lines, within 100 tokens. Do not add prose:
+HYPOTHESIS: <type, Benign, or Uncertain>
+ACTION: {"action":"Stop|ExpandDFG|ExpandCFG|ExpandCALL|RetrieveAlias|CheckReachability","reason":"up to 5 words"}
+REASONING: <up to 15 words, concrete evidence or missing evidence>
+Request expansion only for a specific missing dependency; a dangerous API alone is not proof.'''
+    if TYPE_COVERAGE_PROMPT and (not TYPE_COVERAGE_ROUTING or needs_expanded_types(user_prompt)):
+        prompt = prompt.replace('Buffer Overflow, Taint',
+            'Buffer Overflow, Out-of-Bounds Read, Integer Overflow, Taint')
+    if ACTION_BEFORE_REASONING:
+        lines = prompt.split('\n')
+        reasoning = next(i for i,line in enumerate(lines) if line.startswith('REASONING:'))
+        action = next(i for i,line in enumerate(lines) if line.startswith('ACTION:'))
+        lines[reasoning], lines[action] = lines[action], lines[reasoning]
+        prompt = '\n'.join(lines)
+    return prompt
+
+
+BOUNDED_OBSERVATION_PROMPT = SYSTEM_PROMPT.split("\nFormat:", 1)[0] + """
+Format (each field MUST be short; output all four fields within 120 tokens):
+OBSERVATION: <at most 15 words: key operations and dependencies>
+HYPOTHESIS: <type or "no vulnerability detected">
+REASONING: <at most 15 words: supporting evidence>
+ACTION: {"action":"ExpandDFG|ExpandCFG|ExpandCALL|RetrieveAlias|CheckReachability|SummarizeEvidence|Stop","reason":"at most 5 words"}"""
+
+
+def _summarize_prior(output: str, limit: int = 150) -> str:
+    """Keep the verdict and evidence gap within the existing character budget."""
+    import re
+    fields = []
+    for label, budget in (("HYPOTHESIS", 60), ("REASONING", 65)):
+        match = re.search(
+            rf"^\s*{label}:\s*([^\n\r]*)", output, re.IGNORECASE | re.MULTILINE
+        )
+        if match:
+            fields.append(f"{label}: {match.group(1).strip()[:budget]}")
+    return (" | ".join(fields) if fields else output.strip())[:limit] or "(none)"
 
 
 def build_user_prompt(
@@ -31,13 +96,31 @@ def build_user_prompt(
                不重发完整层次结构，控制多步 token 开销
     """
     if step <= 1:
+        planner = exploration_state.strip() or "(no actions executed)"
         return f"""{hierarchical_context}
 
+EXPLORATION STATE:
+{planner}
+
 Analyze SRC slice, verify with paths. Answer now."""
-    prev = prev_conclusion.strip()[:150] if prev_conclusion else "(none)"
+    from config import STRUCTURED_PRIOR_SUMMARY
+    prev = (_summarize_prior(prev_conclusion) if STRUCTURED_PRIOR_SUMMARY
+            else prev_conclusion.strip()[:150] or "(none)")
+    state = program_state_dump.strip()[:350] if program_state_dump else "(none)"
+    exploration = exploration_state.strip()[:350] if exploration_state else "(none)"
+    evidence = evidence_summary.strip()[:500] if evidence_summary else "(none)"
     return f"""Prior: {prev}
 
 {hierarchical_context}
+
+PROGRAM STATE UPDATE:
+{state}
+
+EXPLORATION STATE:
+{exploration}
+
+EVIDENCE SUMMARY:
+{evidence}
 
 Refine: confirm type or rule out. Answer now."""
 

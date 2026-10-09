@@ -4,6 +4,7 @@ Mode 4: 消融实验
 运行所有消融配置，量化每个模块的贡献。
 """
 import os
+import json
 from config import LLM_MODEL, SYNTHETIC_DIR
 from reasoning.llm_api import create_client
 from evaluation.ablation import run_ablation_study, generate_ablation_report
@@ -27,12 +28,30 @@ def mode_ablation(data_dir: str = None, max_samples: int = 30):
 
     if c_files:
         print(f"  从 {data_dir} 加载 {len(c_files)} 个源文件")
+        metadata = {}
+        metadata_path = os.path.join(data_dir, "metadata.json")
+        if os.path.exists(metadata_path):
+            with open(metadata_path, encoding="utf-8") as f:
+                metadata = json.load(f)
+        meta_map = {s.get("filename"): s for s in metadata.get("samples", [])
+                    if s.get("filename")}
+        if meta_map:
+            c_files = [f for f in c_files if f in meta_map]
         for idx, fname in enumerate(c_files):
             fpath = os.path.join(data_dir, fname)
             with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                 code = f.read()
-            label = 1 if any(kw in fname.lower() for kw in ["uaf", "overflow", "double_free", "taint", "leak", "null"]) else 0
-            all_samples.append({"id": idx + 1, "code": code, "label": label})
+            meta = meta_map.get(fname, {})
+            label = meta.get("label")
+            if label is None:
+                label = 1 if any(kw in fname.lower() for kw in [
+                    "uaf", "overflow", "double_free", "taint", "leak", "null"
+                ]) else 0
+            all_samples.append({
+                "id": meta.get("id", idx + 1), "code": code, "label": label,
+                "vul_type": meta.get("vul_type", "unknown"),
+                "hop_count": meta.get("hop_count", 0),
+            })
     else:
         from data.synthetic_generator import SyntheticDatasetGenerator
         generator = SyntheticDatasetGenerator()

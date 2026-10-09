@@ -14,6 +14,15 @@
 """
 
 
+def create_program_state():
+    """Single opt-in factory; legacy behavior remains the default."""
+    from config import OBSERVED_STATE_CANDIDATE
+    if OBSERVED_STATE_CANDIDATE:
+        from planning.observed_state import ObservedProgramState
+        return ObservedProgramState()
+    return ProgramState()
+
+
 class ProgramState:
 
     VALID_STATES = {
@@ -48,6 +57,11 @@ class ProgramState:
             )
         if var not in self.states:
             self.states[var] = []
+        # 同一图节点可能出现在多条路径、多个推理步骤中；它仍是同一个
+        # 程序事件，重复记录会把一次 free 伪造成 double-free。
+        if any(h["state"] == state and h["source"] == source_node
+               for h in self.states[var]):
+            return
         self.states[var].append({
             "state": state,
             "source": source_node,
@@ -148,158 +162,88 @@ class ProgramState:
         """
         import re
 
-        # 1) 提取所有声明：包括 typedef 类型、struct、uintX_t 等
-        #    匹配: TYPE *name; , TYPE *name = ..., TYPE name[N], TYPE name = ...
-        local_vars = re.findall(
-            r'(?:\b(?:int|char|void|float|double|long|short|unsigned|signed|size_t|uint\d+_t|int\d+_t|uintptr_t|ssize_t|off_t|bool|FILE|struct\s+\w+|union\s+\w+|const)\s+\*?)\s*(\w+)\s*(?:\[[^\]]*\])?\s*(?:[=;])',
-            code
-        )
-        # 补充: 匹配带初始化的复杂声明: type *name = (type *)malloc(...)
-        local_vars += re.findall(
-            r'\*?\s*(\w+)\s*=\s*(?:\(\s*\w+\s*\*\s*\)\s*)?(?:malloc|calloc|realloc|av_malloc|kmalloc)\(',
-            code
-        )
+        keywords = {"if", "else", "while", "for", "return", "sizeof", "switch",
+                    "case", "struct", "static", "const", "typedef", "enum", "union",
+                    "break", "continue", "goto", "do", "extern", "volatile", "inline",
+                    "void"}
+        events = []  # (source offset, priority, variable, state, source)
 
-        for var in local_vars:
-            if var in {"if", "else", "while", "for", "return", "sizeof",
-                       "switch", "case", "struct", "static", "const",
-                       "typedef", "enum", "union", "break", "continue",
-                       "goto", "do", "extern", "volatile", "inline"}:
-                continue
-            if var not in self.states and len(var) > 0:
-                self.states[var] = []
+        def add_event(pos, var, state, source, priority=1):
+            var = (var or "").lstrip("&*")
+            if not var or var in keywords:
+                return
+            self.states.setdefault(var, [])
+            events.append((pos, priority, var, state, source))
 
-        # 2) 函数参数：从函数定义中提取
-        func_params = re.findall(
-            r'\b\w+\s+\w+\s*\(([^)]*)\)\s*\{',
-            code, re.DOTALL
-        )
-        for params_str in func_params:
-            # 末尾支持 $ 以匹配单参数无逗号/无右括号的情况
-            params = re.findall(
-                r'(?:const\s+)?(?:\w+(?:\s+\w+)?(?:\s*\*)?)\s+(\w+)\s*(?:\[[^\]]*\])?\s*(?:,|\)|$)',
-                params_str
-            )
-            for var in params:
-                if var not in self.states and len(var) > 0 and var not in {"void"}:
-                    self.states[var] = []
+        # Declarations and parameters establish the tracked variable universe.
+        decl_re = re.compile(
+            r'\b(?:const\s+)?(?:struct\s+\w+|union\s+\w+|unsigned|signed|long|short|'
+            r'int|char|void|float|double|size_t|u?int\d+_t|uintptr_t|ssize_t|off_t|bool|FILE)'
+            r'(?:\s+\w+)*\s+\**\s*(\w+)')
+        for m in decl_re.finditer(code):
+            if m.group(1) not in keywords:
+                self.states.setdefault(m.group(1), [])
 
-        # 3) 追踪结构体成员访问
-        struct_deref = re.findall(r'(\w+)->(\w+)', code)
-        tracked_vars = set(self.states.keys())
-        for parent, member in struct_deref:
-            full_path = f"{parent}->{member}"
-            if parent in tracked_vars and full_path not in self.states:
-                self.states[full_path] = [{
-                    "state": "dereferenced",
-                    "source": "source_code",
-                    "step": 0,
-                }]
+        alloc_re = re.compile(
+            r'\b(\w+)\s*=\s*(?:\([^;=]*?\)\s*)?'
+            r'(malloc|calloc|realloc|alloca|mmap|av_malloc|av_calloc|av_mallocz|'
+            r'av_malloc_array|kmalloc|kzalloc)\s*\(')
+        for m in alloc_re.finditer(code):
+            add_event(m.start(), m.group(1), "allocated", m.group(2))
 
-        # 4) 追踪分配：支持强制类型转换和更灵活的模式
-        alloc_call = re.findall(
-            r'(?P<var>\w+)\s*=\s*(?:\([^)]*\)\s*)?(?P<func>malloc|calloc|realloc|alloca|mmap|av_malloc|av_calloc|av_mallocz|av_malloc_array|kmalloc|kzalloc)\s*\(',
-            code
-        )
-        for var, func in alloc_call:
-            if var not in self.states:
-                self.states[var] = []
-            self.states[var].append({
-                "state": "allocated",
-                "source": func,
-                "step": 0,
-            })
+        free_re = re.compile(r'\b(free|av_free|kfree|av_freep|munmap)\s*\(\s*([&*]?\w+)')
+        for m in free_re.finditer(code):
+            add_event(m.start(), m.group(2), "freed", m.group(1))
 
-        # 5) 追踪释放
-        free_call = re.findall(r'\b(free|av_free|kfree|av_freep|munmap)\s*\(\s*(\w+)\s*\)', code)
-        for func, var in free_call:
-            if var not in self.states:
-                self.states[var] = []
-            self.states[var].append({
-                "state": "freed",
-                "source": func,
-                "step": 0,
-            })
+        # Source APIs have different argument positions; capture the buffer argument explicitly.
+        taint_patterns = [
+            ("buffer_second", re.compile(
+                r'\b(recv|recvfrom|recvmsg|read)\s*\([^,]*,\s*&?(\w+)')),
+            ("buffer_first", re.compile(r'\b(fread|fgets|gets)\s*\(\s*&?(\w+)')),
+            ("scanf", re.compile(r'\b(scanf|sscanf|fscanf)\s*\([^,]*,\s*&?(\w+)')),
+            ("getenv", re.compile(r'\b(\w+)\s*=\s*(getenv)\s*\(')),
+        ]
+        for family, rx in taint_patterns:
+            for m in rx.finditer(code):
+                if family == "getenv":
+                    add_event(m.start(), m.group(1), "tainted", m.group(2))
+                else:
+                    add_event(m.start(), m.group(2), "tainted", m.group(1))
 
-        # 6) 追踪污点源：recv/read/scanf 等
-        for source in ["recv", "read", "scanf", "fgets", "getenv", "argv", "recvfrom", "recvmsg"]:
-            taint_call = re.findall(
-                rf'(?:{source})\s*\([^)]*(?:,\s*((?:&)?\w+)\s*[,)])',
-                code
-            )
-            for var in taint_call:
-                var = var.lstrip("&")
-                if var not in self.states:
-                    self.states[var] = []
-                self.states[var].append({
-                    "state": "tainted",
-                    "source": source,
-                    "step": 0,
-                })
+        for m in re.finditer(r'\b(\w+)\s*->\s*\w+', code):
+            add_event(m.start(), m.group(1), "dereferenced", "source_code")
+        for m in re.finditer(r'\b(\w+)\s*\[[^\]]+\]', code):
+            add_event(m.start(), m.group(1), "indexed", "source_code")
+            add_event(m.start(), m.group(1), "dereferenced", "source_code")
+        for m in re.finditer(r'(?<![\w)])\*\s*(\w+)', code):
+            line_start = code.rfind("\n", 0, m.start()) + 1
+            prefix = code[line_start:m.start()]
+            if not re.search(r'\b(?:char|int|void|long|short|float|double|struct\s+\w+)\s*$', prefix):
+                add_event(m.start(), m.group(1), "dereferenced", "source_code")
 
-        # 7) 追踪解引用
-        deref_calls = re.findall(r'\*(\w+)\s*(?:=|\[)', code)
-        for var in deref_calls:
-            if var and var in self.states:
-                self.states[var].append({
-                    "state": "dereferenced",
-                    "source": "source_code",
-                    "step": 0,
-                })
+        null_rx = re.compile(
+            r'\b(\w+)\s*(?:==|!=)\s*(?:NULL|0)\b|!\s*(\w+)\b|'
+            r'\b(\w+)\s*\?')
+        for m in null_rx.finditer(code):
+            add_event(m.start(), next(g for g in m.groups() if g),
+                      "null-checked", "source_code")
 
-        # 8) 追踪空指针检查
-        null_checks = re.findall(r'(\w+)\s*(?:!=\s*NULL|==\s*NULL|==\s*0)', code)
-        null_checks += re.findall(r'!\s*(\w+)(?:\s*\()', code)
-        for var in null_checks:
-            if var in self.states:
-                self.states[var].append({
-                    "state": "null-checked",
-                    "source": "source_code",
-                    "step": 0,
-                })
+        cmp_rx = re.compile(r'\b(\w+)\s*(>=|<=|>|<|==|!=)\s*(-?\d+|NULL)')
+        for m in cmp_rx.finditer(code):
+            op, val = m.group(2), m.group(3)
+            if op in ("==", "!=") and val in ("0", "NULL"):
+                state = "null-checked"
+            elif op in ("<", ">", "<=", ">=") and val in ("0", "-1"):
+                state = "error-checked"
+            else:
+                state = "checked"
+            add_event(m.start(), m.group(1), state, f"{op} {val}")
 
-        # 9) 追踪数组/指针索引访问
-        index_access = re.findall(r'(\w+)\s*\[\s*\w+\s*\]', code)
-        for var in index_access:
-            if var in self.states:
-                self.states[var].append({
-                    "state": "indexed",
-                    "source": "source_code",
-                    "step": 0,
-                })
+        for m in re.finditer(r'\b(\w+)\s*=(?!=)', code):
+            # 同一源码位置的普通赋值先于更具体的 allocated/tainted 事件，
+            # 避免 `p = malloc(...)` 的最终状态被泛化的 assigned 覆盖。
+            add_event(m.start(), m.group(1), "assigned", "source_code", priority=0)
 
-        # 10) 追踪所有赋值操作（为已捕获变量记录 assigned）
-        # (?!=) 排除 == 比较，避免把 if (x == NULL) 记成赋值（原 \w+\s*= 会命中）
-        all_assigns = re.findall(r'\b(\w+)\s*=(?!=)', code)
-        for var in all_assigns:
-            if var in self.states and var not in {"if", "for", "while", "switch", "else"}:
-                self.states[var].append({
-                    "state": "assigned",
-                    "source": "source_code",
-                    "step": 0,
-                })
-
-        # 11) 追踪返回值检查模式（研究计划 Stage 6: Program State Memory）
-        #     识别变量是否在赋值后被用于条件检查
-        for var in list(self.states.keys()):
-            # 跳过太短的变量名（通常是关键字误匹配）
-            if len(var) <= 1:
-                continue
-            # 检查变量是否被用于比较检查
-            if re.search(rf'\b{re.escape(var)}\s*(>=|<=|>|<|==|!=)\s*(-?\d+|NULL)', code):
-                comparison = re.search(rf'\b{re.escape(var)}\s*(>=|<=|>|<|==|!=)\s*(-?\d+|NULL)', code)
-                if comparison:
-                    op = comparison.group(1)
-                    val = comparison.group(2)
-                    # 分类检查类型
-                    if op in ('==', '!=') and val in ('0', 'NULL'):
-                        check_type = "null-checked"
-                    elif op in ('<', '>', '<=', '>=') and val in ('0', '-1'):
-                        check_type = "error-checked"
-                    else:
-                        check_type = "checked"
-                    self.states[var].append({
-                        "state": check_type,
-                        "source": f"{op} {val}",
-                        "step": 0,
-                    })
+        # Preserve actual source order; this is essential for UAF and null-deref checks.
+        for _, _, var, state, source in sorted(events, key=lambda x: (x[0], x[1])):
+            self.states[var].append({"state": state, "source": source, "step": 0})

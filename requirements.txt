@@ -4,3 +4,7 @@ numpy>=1.24
 scikit-learn>=1.3
 matplotlib>=3.5
 tqdm>=4.60
+joblib>=1.3
+torch>=2.1
+torch-geometric>=2.5
+socksio>=1.0

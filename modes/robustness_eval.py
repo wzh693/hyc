@@ -4,7 +4,9 @@ Mode 5: 鲁棒性评估
 对代码进行语义等价变换，测试模型稳定性。
 """
 import os
+import json
 import tempfile
+import shutil
 
 from config import LLM_MODEL, SYNTHETIC_DIR
 from graph.build_cpg import build_cpg, find_export_files
@@ -14,10 +16,8 @@ from retrieval.candidate_paths import extract_all_candidate_paths
 from retrieval.retrieve_topk import retrieve_topk
 from linearization.function_summary import summarize_function
 from linearization.block_summary import summarize_block
-from linearization.typed_paths import typed_dependency_path, build_hierarchical_context, extract_api_hints
 from reasoning.llm_api import create_client
 from reasoning.reasoning_loop import reasoning_loop
-from planning.state_memory import ProgramState
 from evaluation.robustness import (
     evaluate_robustness, generate_robustness_report,
 )
@@ -41,12 +41,28 @@ def mode_robustness_eval(data_dir: str = None, max_samples: int = 30):
 
     if c_files:
         print(f"  从 {data_dir} 加载 {len(c_files)} 个源文件")
+        metadata = {}
+        metadata_path = os.path.join(data_dir, "metadata.json")
+        if os.path.exists(metadata_path):
+            with open(metadata_path, encoding="utf-8") as f:
+                metadata = json.load(f)
+        meta_map = {s.get("filename"): s for s in metadata.get("samples", [])
+                    if s.get("filename")}
+        if meta_map:
+            c_files = [f for f in c_files if f in meta_map]
         for idx, fname in enumerate(c_files):
             fpath = os.path.join(data_dir, fname)
             with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                 code = f.read()
-            label = 1 if any(kw in fname.lower() for kw in ["uaf", "overflow", "double_free", "taint", "leak", "null"]) else 0
-            all_samples.append({"id": idx + 1, "code": code, "label": label})
+            meta = meta_map.get(fname, {})
+            label = meta.get("label")
+            if label is None:
+                label = 1 if any(kw in fname.lower() for kw in [
+                    "uaf", "overflow", "double_free", "taint", "leak", "null"
+                ]) else 0
+            all_samples.append({
+                "id": meta.get("id", idx + 1), "code": code, "label": label,
+            })
     else:
         from data.synthetic_generator import SyntheticDatasetGenerator
         generator = SyntheticDatasetGenerator()
@@ -66,41 +82,12 @@ def mode_robustness_eval(data_dir: str = None, max_samples: int = 30):
             f.write(code)
 
         try:
-            export_dir = build_cpg(code_path, tmpdir)
-            nodes_file, edges_file = find_export_files(export_dir)
-            G = load_graph(nodes_file, edges_file)
-            SG = summarize_graph(G, verbose=False)
-            paths = extract_all_candidate_paths(SG, source_code=code)
-            if not paths:
-                paths = extract_all_candidate_paths(G, source_code=code)
-            topk = retrieve_topk(SG, paths)
-
-            # 完整 HGL-Vul 管线：层次化线性化 + 程序状态记忆 + 受限推理
-            func_summary = summarize_function(code)
-            api_hints = extract_api_hints(code)
-            blocks = code.split("\n\n")
-            block_summaries = {}
-            for j, block in enumerate(blocks):
-                if block.strip():
-                    block_summaries[j] = summarize_block(block) or block.strip()[:80]
-
-            paths_context = []
-            for path in topk[:5]:
-                path_str = typed_dependency_path(SG, path, api_hints=api_hints)
-                if path_str:
-                    paths_context.append(path_str)
-
-            state = ProgramState()
-            state.track_vars(code)
-
-            loop_result = reasoning_loop(
-                SG, topk, code, func_summary, block_summaries,
-                client=llm_client,
-            )
-            conclusion = loop_result.get("conclusion", "").lower()
-            return 1 if "vulnerable" in conclusion else 0
-        except Exception:
-            return 0
+            from graph.pipeline import run_hgl_pipeline
+            prediction, _, _, _ = run_hgl_pipeline(code_path, code, "robustness",
+                                                   tmpdir, llm_client)
+            return prediction
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     # 运行鲁棒性评估
     output_dir = os.path.join("output", "robustness")

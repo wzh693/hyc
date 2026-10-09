@@ -1,0 +1,11 @@
+{
+  "active_development_baseline": "type_coverage_reconstructed_20261008",
+  "source_root": "C:\\Users\\wzh13\\Desktop\\Network Security Research\\2.0\\HGL-Vul\\development\\type_coverage_reconstructed_20261008\\src",
+  "frozen_baseline": "C:\\Users\\wzh13\\Desktop\\Network Security Research\\2.0\\HGL-Vul\\baselines\\type_coverage_reconstructed_20261008\\baseline.json",
+  "prediction_score": null,
+  "selection_date": "2026-10-09",
+  "source_identity": "47 files byte-identical to frozen foundation",
+  "research_direction": "graph compression -> read-related path retrieval -> graph-anchored source evidence -> bounded reasoning",
+  "rejected_candidate_snapshot": "output/sven_complete_src_eval_20261008/code_snapshot",
+  "live_test_authorized": false
+}

@@ -39,25 +39,29 @@ from learning.features import (NODE_FEATURE_NAMES, _graph_context,
 
 CACHE_DIR = os.path.join("output", "train_cpg")
 MODEL_DIR = os.path.join("learning", "model")
-SKELETON_PATH = os.path.join(MODEL_DIR, "skeleton.pkl")
 
-FEATURE_VER = hashlib.md5(
-    ("|".join(NODE_FEATURE_NAMES) +
-     str(os.path.getmtime(os.path.join(os.path.dirname(__file__), "features.py"))) +
-     # load_graph.py 修复 node_type 崩坏后特征分布变化, 版本键须感知图解析层
-     "graphfix_v1" + str(os.path.getmtime(os.path.join(
-         os.path.dirname(os.path.dirname(__file__)), "graph", "load_graph.py"))) +
-     # BUG-20（审查报告）：检索管线变更同样改变特征/锚点分布——
-     # candidate_paths 起点匹配（BUG-01）、ranker 偏置（BUG-04）、
-     # 图对象统一（BUG-09）都影响 skeleton 与特征缓存，版本键须覆盖
-     "retrfix_v1" + str(os.path.getmtime(os.path.join(
-         os.path.dirname(os.path.dirname(__file__)), "retrieval", "candidate_paths.py"))) +
-     str(os.path.getmtime(os.path.join(
-         os.path.dirname(os.path.dirname(__file__)), "retrieval", "path_ranker.py"))) +
-     str(os.path.getmtime(os.path.join(
-         os.path.dirname(os.path.dirname(__file__)), "graph", "summarize_graph.py")))
-    ).encode()
-).hexdigest()[:10]
+
+def _hash_files(*paths):
+    h = hashlib.sha256()
+    for path in paths:
+        with open(path, "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()[:10]
+
+
+_ROOT = os.path.dirname(os.path.dirname(__file__))
+SKELETON_VER = _hash_files(
+    os.path.join(os.path.dirname(__file__), "dataset.py"),
+    os.path.join(_ROOT, "graph", "load_graph.py"),
+    os.path.join(_ROOT, "graph", "summarize_graph.py"),
+    os.path.join(_ROOT, "retrieval", "candidate_paths.py"),
+    os.path.join(_ROOT, "retrieval", "path_ranker.py"),
+)
+SKELETON_PATH = os.path.join(MODEL_DIR, f"skeleton_{SKELETON_VER}.pkl")
+FEATURE_VER = _hash_files(
+    os.path.join(os.path.dirname(__file__), "features.py"),
+    os.path.join(_ROOT, "graph", "load_graph.py"),
+)
 
 _FUNC_CACHE = {}
 
@@ -92,6 +96,7 @@ def _load_or_build_skeleton(meta):
             code = _load_func_source(info["idx"])
             if code is None:
                 continue
+            selected, labels, n_anchors = None, None, 0
             try:
                 G = load_graph(os.path.join(CACHE_DIR, fid, "export", "export.dot"),
                                os.path.join(CACHE_DIR, fid, "export", "export.dot"))
