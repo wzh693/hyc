@@ -146,3 +146,27 @@ CWE190 control.542857/.514286 vs candidate.400000/.371429; overall second
 Accuracy declines and family intervals cross0. Keep foundation/default unchanged,
 candidateOFF; no CWE routing, rerun, locked Devign or GitHub. Authorization consumed.
 Read evaluation/GRAPH_EVIDENCE_CARDS_LLM_FINDINGS_20261009.md before future work.
+
+On 2026-10-10 the user explicitly requests an isolated converged three-stage
+architecture experiment, accepting consideration of small quality loss for
+simplicity (not automatic promotion or a measured noninferiority claim).
+Local branch codex/converged-architecture-20261010 contains the standalone
+development/converged_graph_candidate_20261010 prototype. Read its README.
+Preserve all prior source and results. This is an architecture-level change,
+not a single-component causal ablation. Existing GAT/MIL checkpoints may be used
+for engineering diagnostics only; failed bag calibration must remain disclosed.
+The graph risk net is shadow-only without a new bound calibration receipt.
+Full local254 offline mock preflight is allowed; no new live API calls, model
+training on locked data, promotion or GitHub upload is authorized by this request.
+
+The new prototype's full254 paired offline preflight is COMPLETE at
+output/converged_architecture_preflight_v2_20261010: 508 actual first mock requests,
+zero runtime errors/external attempts/paid calls; 254 local GAT forwards. Read-only
+graph/source audit passes358 displayed paths and1871 source-line occurrences.
+15 new synthetic tests,227 existing regressions,5 portable checks passed separately.
+Engineering pass does NOT mean live-quality readiness:19 rows have no criterion
+even in the original graph,43 have empty displayed paths (including those19),144
+hit candidate enumeration cap; net remains shadow and old GAT calibration failed.
+The first preflight attempt is retained and INVALID due to tool/source drift.
+Do not promote, fabricate Accuracy/F1 from mocks, or spend API fees before resolving
+input readiness, defining new calibration and obtaining full-batch authorization.

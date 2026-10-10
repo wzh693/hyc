@@ -1,0 +1,19 @@
+{
+  "name": "converged_graph_architecture_20261010",
+  "status": "engineering_prototype_shadow_net",
+  "selected_default": false,
+  "branch": "codex/converged-architecture-20261010",
+  "preflight": "output/converged_architecture_preflight_v2_20261010",
+  "full_dataset_rows": 254,
+  "paired_mock_requests": 508,
+  "engineering_preflight_passed": true,
+  "independent_graph_source_audit_passed": true,
+  "empty_src_rows": 19,
+  "empty_path_rows": 43,
+  "quality_test_ready": false,
+  "quality_metrics": null,
+  "calibrated_graph_security_net": false,
+  "new_training_completed": false,
+  "future_llm_test_authorized": false,
+  "github_push_authorized": false
+}
