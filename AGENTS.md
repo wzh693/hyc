@@ -170,3 +170,20 @@ hit candidate enumeration cap; net remains shadow and old GAT calibration failed
 The first preflight attempt is retained and INVALID due to tool/source drift.
 Do not promote, fabricate Accuracy/F1 from mocks, or spend API fees before resolving
 input readiness, defining new calibration and obtaining full-batch authorization.
+
+Human approval to continue remaining offline fixes on2026-10-10 created isolated
+development/converged_graph_v2_candidate_20261010. Original prototype and all frozen
+sources stay unchanged. Read the new README/FINDINGS. New criteria are GAT-ranked
+source-mapped executable nodes, not a CWE/API whitelist; PATHS use feasible whole
+units, SRC uses audited original-graph dependence closure. Full254 paired508 mock
+preflight passes, 0 errors/external attempts, independent audit611 paths/2843 source
+line occurrences. Empty SRC19->1 and PATHS43->1; candidate-cap hits144->195. idx146's
+original graph has NO CALL/RETURN nodes; retain row, no fabricated graph or deletion.
+One fixed sparse MIL run on the clean-development allowlisted300 cache rows (293
+available,7 unavailable;231/36/26 train/selection/calibration groups) is complete.
+Features43->7 plus token hashes;10epochs,entropy.01. Data/split/model identity audit
+passes but model diagnostic gate FAILS (reserved AUC.484848,balanced accuracy.418182).
+Full26-group risk-proxy calibration also FAILS: thresholds1/2/3 select only1 benign
+row,>=4 select none; no proxy threshold. No real LLM b_pred, no graph-net flip license.
+Keep net shadow, default unchanged, no automatic retraining/LLM/GitHub promotion.
+Only offline continuation was approved; fresh paid external scope still unapproved.

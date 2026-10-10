@@ -1,0 +1,19 @@
+{
+  "name": "converged_graph_v2_20261010",
+  "status": "engineering_verified_model_and_proxy_diagnostics_failed",
+  "selected_default": false,
+  "preflight": "output/converged_graph_v2_preflight_20261010",
+  "training": "output/converged_minimal_gat_training_20261010",
+  "proxy_calibration": "output/converged_graph_proxy_calibration_20261010",
+  "paired_mock_requests": 508,
+  "empty_source_rows": 1,
+  "empty_path_rows": 1,
+  "candidate_cap_rows": 195,
+  "new_training_completed": true,
+  "model_diagnostic_gate": false,
+  "graph_security_net_calibrated": false,
+  "quality_test_ready": false,
+  "future_llm_test_authorized": false,
+  "github_push_authorized": false,
+  "quality_metrics": null
+}
