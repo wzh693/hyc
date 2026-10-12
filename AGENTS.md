@@ -1,5 +1,122 @@
 # Active development foundation
 
+Latest human2026-10-11 prioritized graph construction/wrapper risk and compression
+dependency preservation, then approved ONE conditional full254 public SVEN LLM
+comparison: foundation/graph-integrity candidate each2repeats,1016 planned results,
+DeepSeek https://api.deepseek.com/v1,deepseek-chat/record actual model,150output,
+max2steps/3attempts per step,user fees. No auto-rerun,CPG rebuild,training,locked
+test or GitHub. Read development/graph_integrity_candidate_20261011/README.md and
+evaluation/GRAPH_INTEGRITY_LLM_PROTOCOL_20261011.md. Only this candidate; no SRC
+filter or compact-output change. Foundation/default remains unchanged.
+Full254 graph audit COMPLETE at output/graph_integrity_preflight_20261011:
+0errors/external calls,only known badidx146,no additional no-path rows,all accepted
+dependency groups intact and estimated budgets respected. This is NOT semantic
+certification or evidence completeness: compressed reads433->270,updates1168->959,
+guards903->826 vs foundation. Existing frozen wrappers/CPGs were NOT rebuilt.
+Actual paired-request preflight and1016 per-result runtime mock checks PASSED:
+1014 actual mock calls,2 candidate146 zero-call pre-inference failures,0 unexpected
+errors/external calls. Paid single batch STARTED2026-10-11 at16:28 Asia/Shanghai
+under hidden supervisor7480 at launch; do not infer continued liveness fromPID.
+Read output/graph_integrity_llm_supervisor_20261011/state.json and actual result
+receipts. One paid execution followed by one offline actual-answer audit; no
+automatic restart or rerun. Candidate146 must retain two zero-call failures;
+planned1016 results correspond to1014 first mock calls,not1016 API calls.
+15 synthetic/accounting tests pass. Read evaluation/GRAPH_INTEGRITY_LLM_PROGRESS_20261011.md
+and authoritative new supervisor state if it exists; never infer running from
+oldPID or duplicate a launch. Do not edit frozen sources/tools while checks run.
+Previous window/compact paid batch is COMPLETE at output/graph_window_llm1016_20261011,
+audit passed,quality rejected; that old authorization is consumed.
+
+Graph-integrity batch is now COMPLETE2026-10-11 at16:43 Asia/Shanghai; this paid
+authorization is CONSUMED. output/graph_integrity_llm1016_20261011/audit.json passes
+all1016 actual-result replays,snapshots,requests,answers,usage and report recompute.
+1017 successful API calls,0HTTP failures/unknown usage,888719tokens,all actual
+deepseek-flash;2 candidate146 pre-call failures retained. Foundation F1.566176/.585185,
+Accuracy.535433/.559055;candidate F1.486486/.496124,Accuracy.476378/.488189.
+Functional gate and all5quality gates FAIL. Keep foundation/default, candidateOFF.
+Read evaluation/GRAPH_INTEGRITY_LLM_FINDINGS_20261011.md. No semantic-wrapper
+recovery/CPG rebuild occurred. Future work should separate quality gate from failed
+compression; no new candidate,paid rerun,GAT,locked data or GitHub automatically.
+
+Human2026-10-11 requested a second four-stage audit and repairs if confirmed.
+Fresh full254 audit output/foundation_recheck_20261011 completed with0errors,
+all read/update/guard stage statistics identical to graph_read_evidence_v2_20261009.
+Nine independent counterexamples pass, including reverse-ID connectivity loss
+and AST reachability masking missing data dependence. Begin ONE isolated SRC
+filter repair at development/source_statement_fidelity_candidate_20261011;
+read its README. Only linearization/typed_paths.py differs from47-file foundation:
+ordinary assignments/inc-dec/leading-star dereferences become eligible. Budgets,
+graph/compression/TopK/DEP/anchors/prompt/decoder/net unchanged. Full254 paired
+stage preflight COMPLETE at output/source_statement_fidelity_preflight_20261011:
+254paired508 materialized recipes,0errors,90SRC changes,no graph/TopK/non-SRC drift.
+Separate per-row runtime proof at output/source_statement_fidelity_runtime_20261011
+PASSED508 actual mock calls (254per arm),0errors/external attempts. Stage cache
+recipe count alone is not an actual-call count. Six repair tests,nine recheck
+counterexamples,two foundation tests pass. SRC reads348->298 (50lost,0added),
+updates481->501 (61added/41lost),guards756->749 (6added/13lost): unchanged budget
+selection displaces old evidence. Filter repair is NOT ready for activation/LLM.
+Keep candidate frozen/OFF; next separate repair must address budget allocation.
+Read evaluation/FOUR_STAGE_RECHECK_AND_REPAIR_20261011.md. Keep foundation/default unchanged,
+all historical artifacts and user skeleton.pkl untouched. Other four-stage issues
+remain queued separately; this is not a claim of F1 improvement. No paid LLM,
+CPG rebuild, training, locked data or GitHub publication authorized by this repair.
+
+Latest user decision2026-10-11: RETIRE GAT data-expansion/training from the active
+research route. Preserve historical frozen code, checkpoints, results and remote
+commits; do not delete or rewrite them. GitHub graph-guided snapshot6da6852 is the
+reference, not the later unpublished converged/GAT branch. New isolated migration
+candidate: development/graph_aligned_compact_candidate_20261011 (read README).
+Retain display-first graph/source alignment and compact native three-line output,
+using foundation compression/retrieval WITHOUT learning imports/checkpoints.
+This combines migration changes, not a single-factor ablation. Default foundation
+remains unchanged until verified quality; no paid calls, training, data downloads,
+locked tests, new graph-net activation or GitHub publication authorized here.
+Older GAT continuation/monitor notes below are historical and do not override this.
+Migration preflight now COMPLETE: output/graph_aligned_compact_preflight_20261011,
+full254 paired508 actual mocks,0errors,0graph/TopK drift,11synthetic/identity tests.
+Read candidate FINDINGS.md: whole-path packing leaves55/254 empty SRC/PATHS;
+257displayed paths,1512source-line occurrences. Provenance passes, input readiness
+does NOT. Keep candidate OFF; do not promote/spend fees or hide these55rows.
+Next suggested offline-only separate candidate is complete-node connected windows
+inside existing Top-K, not training or changing ranking. Not yet implemented.
+
+User then requested LLM but chose "先2再1": first repair55empty displays, then
+test. New isolated graph_window_compact_candidate_20261011 implements fallback
+contiguous whole-node windows ONLY when whole-path packing is empty; never edit
+the frozen migration candidate. Read its README and
+evaluation/GRAPH_WINDOW_COMPACT_PROTOCOL_20261011.md. Full254 offline checks first;
+preserve all empty/failed rows and verify199previously nonempty requests unchanged.
+No paid call launched in this phase; disclose remaining issues and confirm the
+revised batch scope/cost before external calls. No training/GitHub/locked test.
+Window candidate offline preflight COMPLETE at output/graph_window_compact_preflight_20261011:
+full254 paired508 actual mocks,0errors/graph/TopK drift,24unit/identity tests pass.
+Empty SRC/PATHS55->1;54budget failures recovered,1singleton window.199previously
+nonempty requests byte-identical.311displayed paths/windows,1946source-line
+occurrences. Remainingidx146 has noTopK; retain row, no fabricated evidence or
+implicit CPG rebuild. Read FINDINGS.md; coverage is not detection improvement.
+Paid batch not launched; confirm revised scope/cost, then full1016 runtime mocks
+and freeze/audit before external calls. Do not reuse consumed old permissions.
+
+Explicit human approval2026-10-11 now authorizes ONE repaired full254 publicSVEN
+LLM batch: foundation/window-compact candidate each2repeats,1016planned results,
+DeepSeek https://api.deepseek.com/v1,deepseek-chat/record actual model,150output,
+max2steps/3attempts each, user fees. Read GRAPH_WINDOW_LLM_PROTOCOL_20261011.md.
+Includesidx146; no automatic rerun/training/CPG rebuild/locked data/GitHub.
+Complete1016runtime mocks and frozen tools required before paid launch. Tools use
+separate arm processes to avoid absolute-import contamination; no strict temporal
+arm alternation claim. Initial runtime preflight retained at
+output/graph_window_runtime_preflight_20261011 (missing subprocess import,0paid).
+Fixed runtime preflight is output/graph_window_runtime_preflight_v2_20261011.
+27unit/identity tests pass. Never overwrite prior failed/frozen artifacts.
+Full1016 runtime mock now PASSED. Authorized paid batch STARTED2026-10-11
+14:08Asia/Shanghai under hidden supervisor31872 at launch. Read
+evaluation/GRAPH_WINDOW_LLM_PROGRESS_20261011.md and authoritative
+output/graph_window_llm_supervisor_20261011/state.json. Actual rows/receipts append
+under output/graph_window_llm1016_20261011/control and /display before aggregate.
+One paid execution then one offline actual-answer replay; no automatic restart.
+Never infer liveness from oldPID, success before report/audit, or start duplicate.
+Frozen tool/source manifests must remain unchanged while this batch runs.
+
 The user approved returning to the historical type-coverage candidate via an
 isolated reconstruction. The active editable prediction source is now:
 
@@ -187,3 +304,141 @@ Full26-group risk-proxy calibration also FAILS: thresholds1/2/3 select only1 ben
 row,>=4 select none; no proxy threshold. No real LLM b_pred, no graph-net flip license.
 Keep net shadow, default unchanged, no automatic retraining/LLM/GitHub promotion.
 Only offline continuation was approved; fresh paid external scope still unapproved.
+
+Human continuation approval after the failed fixed-weight-decay experiment on
+2026-10-10 authorizes ONE local training-data expansion, not a paid LLM batch.
+Read evaluation/CONVERGED_EXPANSION_PROTOCOL_20261010.md. All2344 admitted
+development rows (2074groups) are frozen at output/converged_expansion_cpg_20261010;
+original selection36/calibration26 stay unchanged. Full CPG preparation runs with
+2workers/one attempt per row, preserving failures; >=90% usable and a full readiness
+audit are required before one fixed10epoch MIL run. Original hyperparameters,
+weight_decay0 and architecture remain unchanged; no locked/validation tuning,
+SVEN training, default activation or GitHub upload. Do not modify frozen tools
+while preparation/training runs. Runtime session91984 did NOT persist across the
+earlier turn: only39 records (38prepared/1failed) existed on2026-10-10 at14:36
+Asia/Shanghai. After a read-only process check found no surviving experiment
+process, an independent hidden local supervisor was launched at14:39, PID39788
+at launch. Its authoritative live state is
+output/converged_expansion_supervisor_20261010/state.json, not the old session id.
+Read that state, phase logs, process existence and receipts before resuming;
+never start a duplicate job or retry failed rows automatically. An orphan runner.lock
+requires a process check, not blind deletion. The supervisor runs preparation,
+readiness audit, conditional training, then full prediction replay; any nonzero
+stage stops the chain without retry. Source
+materialization is conservatively registered for all2344 rows under
+output/devign_converged_expansion_exposure_20261010/meta.json, so future exposure
+inventory does not overlook the non-devign-named CPG directory. Registration is
+not evidence that CPG construction or training completed. The final full replay
+stage is evaluation.audit_converged_expanded_model_20261010; never infer success
+before its receipt exists.
+
+User explicitly requested monitoring on2026-10-10. A current-thread heartbeat
+automation named 监控 HGL-Vul 数据扩充实验 (id hgl-vul) is ACTIVE every15minutes.
+It may read state/logs/receipts and save monitoring snapshots, but may not restart,
+retry, retrain, change frozen sources, spend API fees or publish. Stay quiet for
+normal progress; report actionable stalls/failures/acceptance results/completion
+without repeating the same alert. On completion summarize full audit and actual
+development metrics, then end the monitor. This supersedes earlier no-monitor
+notes; the local supervisor and agent monitor are separate mechanisms.
+
+The expansion pipeline completed2026-10-10 at16:28 Asia/Shanghai: all2344 new
+receipts (2295 prepared/49 failed), readiness passed, one fixed10epoch run,
+and full2588 prediction replay passed out of2644 requested (56 unavailable).
+Expanded model selectedepoch5; selectionAUC.556364, calibrationAUC.606061,
+calibrationBA.630303, diagnostic gate passes. These are repeated development
+diagnostics, not independent LLM quality; trained selection still below identical
+untrained initializationAUC.665455. Monitor hgl-vul is now PAUSED after completion.
+No model promotion or graph-net activation follows from this gate.
+
+User continuation2026-10-11 completed full254 SVEN evidence diagnostics with
+original/expanded/untrained diagnostic weights,762 actual mock requests,zero
+errors/external attempts; all three graph/source reconstruction audits pass.
+Read evaluation/CONVERGED_EVIDENCE_FINDINGS_20261011.md. Expanded coverage is mixed,
+not detection improvement. SRC slices all Top-K endpoints before PATHS budget
+packing;217 expanded rows have at least one SRC criterion absent from displayed
+paths. Next suggested single candidate is display-first slicing, not yet built.
+Do not modify frozen architecture/results, choose untrained weights after seeing
+coverage, introduce CWE routing, call paid LLM, enable net or upload automatically.
+
+User approved the single display-first SRC candidate2026-10-11. Isolated wrapper
+development/converged_display_first_candidate_20261011 changes first-round slice
+criteria to actual displayed path endpoints, without modifying frozen v2 globals.
+Read its README/FINDINGS. Full254 paired preflight is COMPLETE at
+output/converged_display_first_preflight_20261011:508 actual mock requests,zero
+errors/external attempts; both full graph/source reconstruction audits pass.
+24 unit tests pass. Model/graph/budgets/compression/ranking/PATHS/STATE unchanged;
+180 SRC inputs change. SRC/PATHS mismatch rows217->0,empty evidence stays1,
+source line occurrences2832->2494; removed511/added173. Smaller eligible closure
+means omission939->908 is NOT comparable coverage improvement. Candidate remains
+frozen/OFF; no real LLM quality claim or new paid authorization, no activation,
+training, risk-net calibration/flip, locked data or GitHub upload.
+
+Human2026-10-11 explicitly approved ONE full254 public SVEN real LLM batch:
+frozen converged-v2 control/display-first candidate, same expandedGAT, two repeats
+each1016 planned results; DeepSeek endpoint https://api.deepseek.com/v1,
+deepseek-chat/record actual model, max3steps,150output,3attempts per step, user fees.
+Read evaluation/DISPLAY_FIRST_LLM_PROTOCOL_20261011.md. Only this batch; freeze
+tools and pass full1016 runtime mocks before paid calls. Keep all failures,
+length/Uncertain and unknown usage; no decoder fallback, automatic rerun,
+promotion, net flip, locked data, training or GitHub. Mark authorization consumed
+when completed; replay all actual outputs offline before claiming verified results.
+
+This1016-result paid authorization is now CONSUMED. Full batch and offline replay
+COMPLETE at output/display_first_llm1016_20261011, audit passes1016 actual outputs;
+1024 successful calls,0HTTP errors/unknown usage,884782Tokens,all deepseek-flash.
+949Uncertain (787length,162 explicit uncertainty),67 determinate allBenign,0TP.
+Functional gate and all5quality gates FAIL. Read
+evaluation/DISPLAY_FIRST_LLM_FINDINGS_20261011.md. Keep candidate frozen/OFF,
+foundation unchanged and net shadow. First runtime preflight failed372 recipe
+matches dueSTATE hash-order drift; it is retained. New full preflight and paid
+run used startup PYTHONHASHSEED=0, recorded in manifest; no architecture change.
+Next suggested candidate is compact output contract only, not yet authorized or
+implemented. Do not reuse this paid approval, rerun, salvage partial JSON labels,
+compare worst-case abstention MCC as ordinary binary predictions, change models,
+train/tune, enable net, read locked data or upload automatically.
+
+User2026-10-11 approved offline compact-output continuation, NOT another paid
+batch. New isolated candidate is
+development/converged_compact_output_candidate_20261011; read README/FINDINGS.
+Only SYSTEM output contract changes on display-first evidence:32ASCII-char
+reason, no long hypothesis narrative; Vulnerable Query retains8-char stable issue
+key for existing early-stop logic. Decoder,150cap,model,evidence/query logic stay
+frozen; no partial JSON salvage. Full254 paired508 mock preflight COMPLETE at
+output/converged_compact_output_preflight_20261011,zero errors/external attempts,
+both graph/source audits pass (582paths/2494lines per arm),254user messages
+identical,254system contracts changed.32 unit tests pass. UTF8 payload bounds
+112-116bytes Stop/200-236bytes Query are NOT exact DeepSeek token counts;
+tokenizer unavailable locally, no download/API. No live completeness/quality
+claim. Candidate frozen/OFF,net shadow; fresh full-batch external/cost approval
+and full1016 runtime mock preflight required before any new real calls.
+
+Human2026-10-11 "都改一下，然后跑SVEN 数据集" approved fixing all audited bugs
+then ONE full254 SVEN real LLM batch for verdict-fidelity candidate
+development/verdict_fidelity_candidate_20261011 (4 fixes: BUG-A/B verdict
+benign-word unification in reasoning_loop.py, BUG-C parse_binary_verdict phrase
+table alignment, BUG-D SRC comment masking in typed_paths.py; pipeline.py and
+all other 45 files byte-identical to type_coverage_reconstructed control).
+Full audit: 21-item probe,15 unit tests, NEW process-isolated test runner
+evaluation/run_tests_isolated.py (66 test files all pass in 153s, fixes old
+sys.modules pollution under unittest discover). Offline preflight COMPLETE at
+output/verdict_fidelity_preflight_20261011:508 rows,selection_drift=0,
+unexpected_request_diff=0,53 SRC-only input changes,0 paid calls. Preflight
+initially false-positived all254 candidate rows with "Training/model module
+imported": root cause was the graph_window-inherited check assuming a retired
+training branch; this candidate keeps foundation training branch (learning.scorer
+import at runtime is symmetric in both arms, no torch), check removed per
+experiment semantics and documented in
+evaluation/VERDICT_FIDELITY_LLM_PROTOCOL_20261011.md. Full1016 runtime mock
+preflight PASSED at output/verdict_fidelity_runtime_preflight_20261011.
+This1016-result paid batch is CONSUMED and COMPLETE at
+output/verdict_fidelity_llm_20261011:1022 successful calls,0 errors/HTTP
+failures/unknown usage,893381Tokens,all deepseek-flash,987/1022 length finishes.
+Read evaluation/VERDICT_FIDELITY_LLM_FINDINGS_20261011.md. functional_gate
+passes; only fp_not_worse_both passes of the 4 quality gates (FP 67→60/63→60,
+TN+7/+3, Acc+1.6pp/+1.2pp, MCC 0.077→0.109/0.078→0.102 both repeats; F1 flat
+-0.09pp/+0.64pp; all bootstrap CI95 cross 0; always-positive F1=67.36% still
+dominates). Input decomposition: FP gains mainly from verdict-parsing side
+(201 unchanged-input rows net +4/+4), SRC comment masking ~neutral (53 rows net
+0/-1). CWE-190 benefits most (F1 65.2/60.7→68.3/68.3). Candidate stays frozen
+OFF; no promotion/rerun/training/upload. Debug script deleted. Do not reuse
+this paid approval or rerun.
