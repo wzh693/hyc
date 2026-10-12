@@ -442,3 +442,76 @@ dominates). Input decomposition: FP gains mainly from verdict-parsing side
 0/-1). CWE-190 benefits most (F1 65.2/60.7→68.3/68.3). Candidate stays frozen
 OFF; no promotion/rerun/training/upload. Debug script deleted. Do not reuse
 this paid approval or rerun.
+
+Human2026-10-12 "先把这个版本上传github，然后实现" → commit fd3240d pushed to
+origin/codex/converged-architecture-20261010; then implemented verdict-first
+output-contract candidate development/verdict_first_candidate_20261012
+(2-file delta vs frozen foundation: reasoning/prompts.py SYSTEM Format
+two-line contract VERDICT-first + ACTION + _summarize_prior rewrite to
+VERDICT/ACTION fields; reasoning/reasoning_loop.py 4 regexes accept
+VERDICT|HYPOTHESIS dual labels; other 45 files byte-identical, verified by
+16 unit tests evaluation/test_verdict_first_20261012.py incl. truncation
+survival + isolation). Offline preflight PASS at
+output/verdict_first_preflight_20261012: 508 rows, 0 errors/selection_drift/
+user_message_drift, system_contract_changes=254 (user msgs byte-identical,
+only SYSTEM differs). Full1016 runtime mock preflight PASS at
+output/verdict_first_runtime_preflight_20261012 (rerun once after fixing a
+clone-time json.dumps(encoding=) bug in orchestrate and after writing the
+approved authorization text into the manifest chain). Human approved
+verdict-first full254x2x2 single batch 2026-10-12; CONSUMED and COMPLETE at
+output/verdict_first_llm_20261012: 1018 calls, 0 errors, 826917 tokens, all
+deepseek-flash. Results: length_calls 96.5%→0/508 (truncation channel fully
+eliminated, 508/508 contract compliance), FP 64/62→5/5 (-92%, delta CI95
+[-94,-29], precision .56→.64) so fp_not_worse_both PASS, BUT recall
+collapsed .64/.58→.07 (479/508 answers "no vulnerability detected") →
+FN 47/54→120/120, F1 .5964/.5639→.1259, only 1 of 4 quality gates passes,
+repeat disagreements 45→2 (near-deterministic at temperature 0).
+Core lesson: truncation was NOT masking true detections; control recall
+came from Step1ConfirmStop/planner-backstop/graph-danger mechanical
+amplification that produced TP and FP together; clean two-line outputs
+bypass backstops and expose strong model-level benign bias. Candidate stays
+frozen OFF; no promotion/rerun/training/upload. Do not reuse this paid
+approval or rerun. Read evaluation/VERDICT_FIRST_LLM_FINDINGS_20261012.md
+and evaluation/VERDICT_FIRST_LLM_PROTOCOL_20261012.md.
+
+Human2026-10-12 "先试非对称契约候选，再检索侧增强候选" plus in-conversation
+batch approval "可以" → implemented asymmetric evidence-burden candidate
+development/asymmetric_bounds_candidate_20261012 (2-file delta on top of
+verdict-first proven changes: reasoning/prompts.py SYSTEM Format third-line
+BOUNDS verbatim-guard obligation + build_bounds_challenge_prompt with FULL
+SRC/Top-2 labeled DEP paths; reasoning/reasoning_loop.py _benign_bounds_valid
+validator (normalized verbatim window ladder 80→10 + guard-token regex) +
+step1 benign-without-valid-quote → controlled step2 challenge; no mechanical
+label flips; other45 files byte-identical; 25 unit tests pass incl.
+single_step limit gate). Offline preflight PASS at
+output/asymmetric_bounds_preflight_20261012: 508 rows, 0 errors/
+selection_drift/user_message_drift, system_contract_changes=254, idx%3
+scenario mocks self-checked by the candidate's own validator. Full1016
+runtime mock PASS at output/asymmetric_bounds_runtime_mock_20261012: 1354
+mock requests (control508+asym846); runner mock step-counting bug fixed
+before launch (own.append in mock branch, else challenge calls misread as
+step1 freeze violations). Paid batch CONSUMED and COMPLETE at
+output/asymmetric_bounds_llm_20261012: 1107 successful calls (control
+255+255 incl.2 planner second steps, asym297+300=508+89 challenges), 0
+errors/unknown usage, 949998 tokens, all actual deepseek-flash. Results:
+asym F1 .3195/.3584 (TP27/31, FP13/13, FN102/98, TN112) vs control F1
+.5918/.5344 (FP59/63); recall recovered .07→.21/.24 vs verdict-first but
+only1/4 gates pass (fp_not_worse_both; F1 interval delta -.272 CI95
+[-.469,-.068]; fails always-positive .6736). Mechanism findings: step1
+type rate 5.7%→16.5%; 79% of 424 benign answers cited validator-passing
+verbatim guards → benign_bounds_proven 1-request exit carrying 147/200 FNs
+(verbatim quote ≠ semantic proof; real即停率 79% ≫ mock-designed 1/3);
+challenge step 89 rows with FULL SRC+labeled DEP paths produced 0 type
+flips (53 FNs stayed) — model benign bias is evidence-insensitive at
+temperature 0; asym length_calls 0 vs control ~96% truncated; repeat
+disagreements control57 vs asym18. Audit deviation: challenge finals
+recorded planner_stop not asymmetric_challenge_final (step2 ACTION Stop
+fires planner break before expansion break; challenge_verdict not
+recorded) — no impact on predictions/requests/freeze; loop-level unit
+tests did not cover full-pipeline planner-first path order. Contract-side
+chain (verdict-first→asymmetric) exhausted; recall ceiling locked by
+model benign bias; proceed to retrieval-side candidate per user order
+(retrieval change breaks frozen topk cache, preflight needs redesigned
+selection invariants). Candidate frozen OFF, foundation unchanged,
+authorization consumed; no rerun/promotion/training/GitHub. Read
+evaluation/ASYMMETRIC_BOUNDS_LLM_FINDINGS_20261012.md.
